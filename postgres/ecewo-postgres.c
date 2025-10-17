@@ -618,7 +618,29 @@ int query_queue(PGquery *pg,
 
         for (int i = 0; i < param_count; i++)
         {
-            query->params[i] = params[i] ? strdup(params[i]) : NULL;
+            if (params[i])
+            {
+                query->params[i] = strdup(params[i]);
+
+                if (!query->params[i])
+                {
+                    printf("query_queue: Failed to allocate a param\n");
+
+                    for (int j = 0; j < i; j++)
+                    {
+                        free(query->params[j]);
+                    }
+
+                    free(query->params);
+                    free(query->sql);
+                    free(query);
+                    return -1
+                }
+            }
+            else
+            {
+                query->params[i] = NULL;
+            }
         }
     }
     else

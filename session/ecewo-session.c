@@ -388,8 +388,10 @@ void session_value_set(Session *sess, const char *key, const char *value)
     char *encoded_value = url_encode(value);
     if (!encoded_key || !encoded_value)
     {
-        free(encoded_key);
-        free(encoded_value);
+        if (encoded_key)
+            free(encoded_key);
+        else if (encoded_value)
+            free(encoded_value);
         return;
     }
 

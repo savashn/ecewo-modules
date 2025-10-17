@@ -8,9 +8,6 @@
 
 static char *make_error_msg(void *context, int errcode)
 {
-    if (errcode >= 0)
-        return NULL;
-
     // Use framework macros - works with both Req and Res
     Req *req = (Req *)context;
     return ecewo_sprintf(req, "%s: %s",
