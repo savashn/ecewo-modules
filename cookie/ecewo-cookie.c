@@ -21,7 +21,6 @@ static bool is_token_char(unsigned char c)
     if (c < 0x21 || c > 0x7E)
         return false;
 
-    // Exclude separator characters
     switch (c)
     {
     case '(':
@@ -49,7 +48,6 @@ static bool is_token_char(unsigned char c)
     }
 }
 
-// URL decode helper function
 static int url_decode_char(char high, char low)
 {
     int h = (high >= '0' && high <= '9')   ? high - '0'
@@ -67,7 +65,6 @@ static int url_decode_char(char high, char low)
     return (h << 4) | l;
 }
 
-// UTF-8 aware URL decode function
 static char *url_decode(Arena *arena, const char *src, size_t src_len)
 {
     if (!arena || !src)
@@ -96,7 +93,6 @@ static char *url_decode(Arena *arena, const char *src, size_t src_len)
     return decoded;
 }
 
-// RFC 6265 compliant cookie name validation
 static bool is_valid_cookie_name(const char *name)
 {
     if (!name || *name == '\0')
@@ -115,27 +111,23 @@ static bool is_valid_cookie_name(const char *name)
     return true;
 }
 
-// Trim whitespace from both ends
 static void trim_whitespace(const char **start, size_t *len)
 {
     if (!start || !*start || !len)
         return;
 
-    // Trim leading whitespace
     while (*len > 0 && isspace((unsigned char)**start))
     {
         (*start)++;
         (*len)--;
     }
 
-    // Trim trailing whitespace
     while (*len > 0 && isspace((unsigned char)(*start)[*len - 1]))
     {
         (*len)--;
     }
 }
 
-// Check if character needs URL encoding for cookie values
 static bool needs_encoding(unsigned char c)
 {
     // Encode non-ASCII, control characters, and special cookie characters
@@ -155,7 +147,6 @@ static bool needs_encoding(unsigned char c)
     }
 }
 
-// UTF-8 aware URL encode value
 static char *url_encode_value(Arena *arena, const char *value)
 {
     if (!arena || !value)
@@ -164,7 +155,6 @@ static char *url_encode_value(Arena *arena, const char *value)
     size_t len = strlen(value);
     size_t encoded_len = 0;
 
-    // Calculate needed size
     for (size_t i = 0; i < len; i++)
     {
         encoded_len += needs_encoding((unsigned char)value[i]) ? 3 : 1;
@@ -192,7 +182,6 @@ static char *url_encode_value(Arena *arena, const char *value)
     return encoded;
 }
 
-// Generate expires date string for better browser compatibility
 static char *generate_expires(Arena *arena, int max_age_seconds)
 {
     if (!arena || max_age_seconds < 0)
@@ -240,11 +229,9 @@ char *cookie_get(Req *req, const char *name)
 
         cookie_count++;
 
-        // Find the end of current cookie (either ';' or end of string)
         const char *cookie_end = strchr(pos, ';');
         size_t cookie_len = cookie_end ? (size_t)(cookie_end - pos) : strlen(pos);
 
-        // Check cookie size limit
         if (cookie_len > MAX_COOKIE_SIZE)
         {
             fprintf(stderr, "Cookie too large: %zu bytes\n", cookie_len);
@@ -252,7 +239,6 @@ char *cookie_get(Req *req, const char *name)
             continue;
         }
 
-        // Find the '=' separator
         const char *eq = memchr(pos, '=', cookie_len);
         if (!eq)
         {
@@ -260,43 +246,36 @@ char *cookie_get(Req *req, const char *name)
             continue;
         }
 
-        // Extract name
         const char *current_name = pos;
         size_t current_name_len = (size_t)(eq - pos);
         trim_whitespace(&current_name, &current_name_len);
 
-        // Check if this is our cookie
         if (current_name_len == name_len &&
             strncmp(current_name, name, name_len) == 0)
         {
 
-            // Extract value
             const char *value_start = eq + 1;
             size_t value_len = cookie_len - (size_t)(eq - pos) - 1;
             trim_whitespace(&value_start, &value_len);
 
             if (value_len == 0)
             {
-                // Empty value
                 char *result = arena_alloc(req->arena, 1);
                 if (result)
                     result[0] = '\0';
                 return result;
             }
 
-            // Handle quoted strings
             if (value_len >= 2 && value_start[0] == '"' && value_start[value_len - 1] == '"')
             {
                 value_start++;  // Skip opening quote
                 value_len -= 2; // Remove both quotes
             }
 
-            // Decode URL-encoded value (handles UTF-8)
             char *decoded = url_decode(req->arena, value_start, value_len);
             return decoded;
         }
 
-        // Move to next cookie
         pos = cookie_end ? cookie_end + 1 : NULL;
     }
 
@@ -316,7 +295,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         return;
     }
 
-    // Validate cookie name according to RFC 6265
     if (!is_valid_cookie_name(name))
     {
         fprintf(stderr, "Invalid cookie name: '%s' (must be RFC 6265 token: !#$%%&'*+-.0-9A-Z^_`a-z|~)\n", name);
@@ -325,7 +303,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         return;
     }
 
-    // Check value size limit (URL encoding may expand it)
     if (strlen(value) > MAX_COOKIE_VALUE_LEN)
     {
         fprintf(stderr, "Cookie value too large: %zu bytes (max %d)\n",
@@ -333,14 +310,12 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         return;
     }
 
-    // Validate options
     if (options && options->max_age < -1)
     {
         fprintf(stderr, "Invalid max_age value: %d (use -1 for session cookie)\n", options->max_age);
         return;
     }
 
-    // Extract options with secure defaults
     int max_age = (options && options->max_age >= 0) ? options->max_age : -1;
     const char *path = (options && options->path) ? options->path : "/";
     const char *domain = (options && options->domain) ? options->domain : NULL;
@@ -348,7 +323,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
     bool http_only = options ? options->http_only : false;
     bool secure = options ? options->secure : false;
 
-    // URL encode the value for safety (handles UTF-8, special chars)
     char *encoded_value = url_encode_value(res->arena, value);
     if (!encoded_value)
     {
@@ -356,7 +330,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         return;
     }
 
-    // Start building cookie string
     char *cookie_val = arena_sprintf(res->arena, "%s=%s", name, encoded_value);
     if (!cookie_val)
     {
@@ -364,7 +337,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         return;
     }
 
-    // Add Max-Age if specified
     if (max_age >= 0)
     {
         char *new_cookie = arena_sprintf(res->arena, "%s; Max-Age=%d", cookie_val, max_age);
@@ -375,7 +347,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         }
         cookie_val = new_cookie;
 
-        // Also add Expires for better browser compatibility
         char *expires = generate_expires(res->arena, max_age);
         if (expires)
         {
@@ -387,7 +358,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         }
     }
 
-    // Add Path
     char *new_cookie = arena_sprintf(res->arena, "%s; Path=%s", cookie_val, path);
     if (!new_cookie)
     {
@@ -396,7 +366,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
     }
     cookie_val = new_cookie;
 
-    // Add Domain if specified
     if (domain && strlen(domain) > 0)
     {
         new_cookie = arena_sprintf(res->arena, "%s; Domain=%s", cookie_val, domain);
@@ -408,10 +377,8 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         cookie_val = new_cookie;
     }
 
-    // Add SameSite if specified
     if (same_site && strlen(same_site) > 0)
     {
-        // Validate SameSite value
         if (strcmp(same_site, "Strict") == 0 ||
             strcmp(same_site, "Lax") == 0 ||
             strcmp(same_site, "None") == 0)
@@ -432,7 +399,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         }
     }
 
-    // Add HttpOnly if specified
     if (http_only)
     {
         new_cookie = arena_sprintf(res->arena, "%s; HttpOnly", cookie_val);
@@ -444,7 +410,6 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         cookie_val = new_cookie;
     }
 
-    // Add Secure if specified
     if (secure)
     {
         new_cookie = arena_sprintf(res->arena, "%s; Secure", cookie_val);
@@ -456,14 +421,12 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         cookie_val = new_cookie;
     }
 
-    // Security validation: SameSite=None requires Secure
     if (same_site && strcmp(same_site, "None") == 0 && !secure)
     {
         fprintf(stderr, "Security Error: SameSite=None requires Secure flag for HTTPS\n");
         return;
     }
 
-    // Final size check
     if (strlen(cookie_val) > MAX_COOKIE_SIZE)
     {
         fprintf(stderr, "Final cookie too large: %zu bytes (max %d)\n",
@@ -471,6 +434,5 @@ void cookie_set(Res *res, const char *name, const char *value, Cookie *options)
         return;
     }
 
-    // Set the cookie header
     set_header(res, "Set-Cookie", cookie_val);
 }

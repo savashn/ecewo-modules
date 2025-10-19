@@ -15,27 +15,23 @@
 #include <errno.h>
 #endif
 
-// Dynamic session storage
 static Session *sessions = NULL;
 static int max_sessions = 0;
 static int initialized = 0;
 
-// Key-Value format separators (using ASCII control characters)
 #define KV_DELIMITER '\x1F'        // ASCII Unit Separator - separates key from value
 #define PAIR_DELIMITER '\x1E'      // ASCII Record Separator - separates key-value pairs
-#define MAX_SESSION_DATA_SIZE 4096 // Prevent unlimited growth
+#define MAX_SESSION_DATA_SIZE 4096
 
-// Default cookie options for sessions
 static const Cookie SESSION_COOKIE_DEFAULTS = {
     .max_age = 3600, // 1 hour default
     .path = "/",
     .domain = NULL,
     .same_site = "Lax",
-    .http_only = true, // Prevent JavaScript access
-    .secure = false,   // Set to true in production with HTTPS
+    .http_only = true,
+    .secure = false,
 };
 
-// URL encoding helpers
 static int is_url_safe(char c)
 {
     return (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~');
@@ -154,7 +150,6 @@ void session_cleanup(void)
     if (!initialized)
         return;
 
-    // Free all session data
     for (int i = 0; i < max_sessions; i++)
     {
         if (sessions[i].id[0] != '\0' && sessions[i].data != NULL)
@@ -179,7 +174,6 @@ static int resize_sessions(int new_capacity)
     if (!new_sessions)
         return 0;
 
-    // Initialize new session slots
     for (int i = max_sessions; i < new_capacity; i++)
     {
         memset(&new_sessions[i], 0, sizeof(Session));
@@ -305,7 +299,6 @@ Session *session_create(int max_age)
     generate_session_id(sessions[slot].id);
     sessions[slot].expires = time(NULL) + max_age;
 
-    // Initialize with empty data
     free(sessions[slot].data);
     sessions[slot].data = safe_strdup("");
     if (!sessions[slot].data)
@@ -354,26 +347,22 @@ static void remove_key_from_data(char *data, const char *encoded_key)
         if (key_len == strlen(encoded_key) &&
             strncmp(search_start, encoded_key, key_len) == 0)
         {
-            // Found the key, find the end of this pair
             char *value_start = key_end + 1;
             char *pair_end = strchr(value_start, PAIR_DELIMITER);
 
             if (pair_end)
             {
-                // Remove this pair by shifting the rest
                 char *after_pair = pair_end + 1;
                 size_t remaining_len = strlen(after_pair);
                 memmove(search_start, after_pair, remaining_len + 1);
             }
             else
             {
-                // This is the last pair, just truncate
                 *search_start = '\0';
             }
             break;
         }
 
-        // Move to next pair
         char *next_pair = strchr(search_start, PAIR_DELIMITER);
         search_start = next_pair ? next_pair + 1 : NULL;
     }
@@ -395,7 +384,6 @@ void session_value_set(Session *sess, const char *key, const char *value)
         return;
     }
 
-    // Check session data size limit before adding
     size_t current_len = sess->data ? strlen(sess->data) : 0;
     size_t key_len = strlen(encoded_key);
     size_t value_len = strlen(encoded_value);
@@ -409,13 +397,9 @@ void session_value_set(Session *sess, const char *key, const char *value)
         return;
     }
 
-    // Remove existing key if present
     if (sess->data && strlen(sess->data) > 0)
-    {
         remove_key_from_data(sess->data, encoded_key);
-    }
 
-    // Add new key-value pair
     current_len = sess->data ? strlen(sess->data) : 0;
     size_t new_len = current_len + key_len + value_len + 3; // key + KV_DELIM + value + PAIR_DELIM + null
 
@@ -431,10 +415,8 @@ void session_value_set(Session *sess, const char *key, const char *value)
             new_data[0] = '\0';
         }
 
-        // Append new pair
         strcat(new_data, encoded_key);
 
-        // Add delimiters manually for safety
         size_t pos = strlen(new_data);
         new_data[pos] = KV_DELIMITER;
         new_data[pos + 1] = '\0';
@@ -467,18 +449,15 @@ char *session_value_get(Session *sess, const char *key)
 
     while (search_start && *search_start)
     {
-        // Find key delimiter
         char *key_end = strchr(search_start, KV_DELIMITER);
         if (!key_end)
             break;
 
         size_t key_len = key_end - search_start;
 
-        // Check if this is our key
         if (key_len == strlen(encoded_key) &&
             strncmp(search_start, encoded_key, key_len) == 0)
         {
-            // Found the key, extract value
             char *value_start = key_end + 1;
             char *value_end = strchr(value_start, PAIR_DELIMITER);
 
@@ -496,7 +475,6 @@ char *session_value_get(Session *sess, const char *key)
             break;
         }
 
-        // Move to next pair
         char *next_pair = strchr(search_start, PAIR_DELIMITER);
         search_start = next_pair ? next_pair + 1 : NULL;
     }
@@ -557,7 +535,6 @@ void session_print_all(void)
         printf("[#%02d] id=%.8s..., expires in %lds\n",
                i, s->id, (long)(s->expires - now));
 
-        // Parse and display key-value pairs nicely
         if (s->data && strlen(s->data) > 0)
         {
             char *data_copy = safe_strdup(s->data);
@@ -579,7 +556,6 @@ void session_print_all(void)
                     if (pair_end)
                         *pair_end = '\0';
 
-                    // Decode for display
                     char *decoded_key = url_decode(pair_start);
                     char *decoded_value = url_decode(value_start);
 

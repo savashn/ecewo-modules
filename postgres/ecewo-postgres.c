@@ -5,34 +5,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Query structure
 struct pg_query_s
 {
-    char *sql;                // SQL query string
-    char **params;            // Query parameters
-    int param_count;          // Number of parameters
-    pg_result_cb_t result_cb; // Result callback
-    void *data;               // User data for callback
-    pg_query_t *next;         // Next query in queue
+    char *sql;
+    char **params;
+    int param_count;
+    pg_result_cb_t result_cb;
+    void *data;
+    pg_query_t *next;
 };
 
-// Main async PostgreSQL context
 struct pg_async_s
 {
-    PGconn *conn; // PostgreSQL connection (not owned)
-    void *data;   // User context data
+    PGconn *conn;
+    void *data;
 
-    // Connection state
     int is_connected;
     int is_executing;
-    char *error_message; // Error message
+    char *error_message;
 
-    // Query queue
     pg_query_t *query_queue;
     pg_query_t *query_queue_tail;
     pg_query_t *current_query;
 
-    // libuv handles
     int handle_initialized;
 #ifdef _WIN32
     uv_timer_t timer;
@@ -41,7 +36,6 @@ struct pg_async_s
 #endif
 };
 
-// Forward declarations
 static void execute_next_query(PGquery *pg);
 static void handle_error(PGquery *pg, const char *error);
 static void pg_async_cancel(PGquery *pg);
@@ -59,7 +53,6 @@ static void on_poll_closed(uv_handle_t *handle);
 // CLEANUP HELPERS
 // ============================================================================
 
-// Free query structure properly
 static void free_query(pg_query_t *query)
 {
     if (!query)
@@ -81,7 +74,6 @@ static void free_query(pg_query_t *query)
     free(query);
 }
 
-// Free PGquery structure
 static void free_pgquery(PGquery *pg)
 {
     if (!pg)
@@ -124,13 +116,11 @@ static void on_poll_closed(uv_handle_t *handle)
 // CANCEL AND DESTROY
 // ============================================================================
 
-// Cancel current operations
 static void pg_async_cancel(PGquery *pg)
 {
     if (!pg)
         return;
 
-    // Stop libuv handles
     if (pg->is_executing && pg->handle_initialized)
     {
 #ifdef _WIN32
@@ -149,7 +139,6 @@ static void pg_async_cancel(PGquery *pg)
         pg->handle_initialized = 0;
     }
 
-    // Cancel PostgreSQL operation
     if (pg->conn && pg->is_executing)
     {
         PGcancel *cancel = PQgetCancel(pg->conn);
@@ -163,7 +152,6 @@ static void pg_async_cancel(PGquery *pg)
 
     pg->is_executing = 0;
 
-    // Free remaining queries in queue
     pg_query_t *query = pg->query_queue;
     while (query)
     {
@@ -177,7 +165,6 @@ static void pg_async_cancel(PGquery *pg)
     pg->current_query = NULL;
 }
 
-// Destroy context with proper cleanup
 static void pg_async_destroy(PGquery *pg)
 {
     if (!pg)
@@ -216,20 +203,17 @@ static void handle_error(PGquery *pg, const char *error)
 {
     printf("handle_error: %s\n", error ? error : "Unknown error");
 
-    // Store error message if provided
     if (error && !pg->error_message)
     {
         pg->error_message = strdup(error);
     }
 
-    // Stop execution and decrement async counter
     if (pg->is_executing)
     {
         pg->is_executing = 0;
         decrement_async_work();
     }
 
-    // Cancel and cleanup
     pg_async_destroy(pg);
 }
 
@@ -248,7 +232,6 @@ static void on_timer(uv_timer_t *handle)
 
     PGquery *pg = (PGquery *)handle->data;
 
-    // Check for shutdown
     if (!server_is_running())
     {
         uv_timer_stop(&pg->timer);
@@ -262,7 +245,6 @@ static void on_timer(uv_timer_t *handle)
         return;
     }
 
-    // Consume input
     if (!PQconsumeInput(pg->conn))
     {
         printf("on_timer: PQconsumeInput failed: %s\n", PQerrorMessage(pg->conn));
@@ -270,26 +252,21 @@ static void on_timer(uv_timer_t *handle)
         return;
     }
 
-    // Check if still busy
     if (PQisBusy(pg->conn))
     {
         return;
     }
 
-    // Stop timer while processing
     uv_timer_stop(&pg->timer);
 
-    // Process results
     PGresult *result;
     while ((result = PQgetResult(pg->conn)) != NULL)
     {
-        // Call user callback
         if (pg->current_query && pg->current_query->result_cb)
         {
             pg->current_query->result_cb(pg, result, pg->current_query->data);
         }
 
-        // Check result status
         ExecStatusType result_status = PQresultStatus(result);
 
         if (result_status != PGRES_TUPLES_OK && result_status != PGRES_COMMAND_OK)
@@ -305,7 +282,6 @@ static void on_timer(uv_timer_t *handle)
         PQclear(result);
     }
 
-    // Free current query and continue
     if (pg->current_query)
     {
         free_query(pg->current_query);
@@ -325,7 +301,6 @@ static void on_poll(uv_poll_t *handle, int status, int events)
 
     PGquery *pg = (PGquery *)handle->data;
 
-    // Check for shutdown
     if (!server_is_running())
     {
         uv_poll_stop(&pg->poll);
@@ -339,7 +314,6 @@ static void on_poll(uv_poll_t *handle, int status, int events)
         return;
     }
 
-    // Check poll status
     if (status < 0)
     {
         printf("on_poll: Poll error: %s\n", uv_strerror(status));
@@ -347,7 +321,6 @@ static void on_poll(uv_poll_t *handle, int status, int events)
         return;
     }
 
-    // Consume input
     if (!PQconsumeInput(pg->conn))
     {
         printf("on_poll: PQconsumeInput failed: %s\n", PQerrorMessage(pg->conn));
@@ -355,26 +328,21 @@ static void on_poll(uv_poll_t *handle, int status, int events)
         return;
     }
 
-    // Check if still busy
     if (PQisBusy(pg->conn))
     {
         return;
     }
 
-    // Stop poll while processing
     uv_poll_stop(&pg->poll);
 
-    // Process results
     PGresult *result;
     while ((result = PQgetResult(pg->conn)) != NULL)
     {
-        // Call user callback
         if (pg->current_query && pg->current_query->result_cb)
         {
             pg->current_query->result_cb(pg, result, pg->current_query->data);
         }
 
-        // Check result status
         ExecStatusType result_status = PQresultStatus(result);
 
         if (result_status != PGRES_TUPLES_OK && result_status != PGRES_COMMAND_OK)
@@ -390,7 +358,6 @@ static void on_poll(uv_poll_t *handle, int status, int events)
         PQclear(result);
     }
 
-    // Free current query and continue
     if (pg->current_query)
     {
         free_query(pg->current_query);
@@ -407,19 +374,15 @@ static void on_poll(uv_poll_t *handle, int status, int events)
 
 static void execute_next_query(PGquery *pg)
 {
-    // Check if there are more queries
     if (!pg->query_queue)
     {
-        // All queries completed successfully
         pg->is_executing = 0;
         decrement_async_work();
 
-        // Cleanup
         pg_async_destroy(pg);
         return;
     }
 
-    // Check if server is shutting down
     if (!server_is_running())
     {
         pg->is_executing = 0;
@@ -428,7 +391,6 @@ static void execute_next_query(PGquery *pg)
         return;
     }
 
-    // Get next query from queue
     pg->current_query = pg->query_queue;
     pg->query_queue = pg->query_queue->next;
     if (!pg->query_queue)
@@ -436,7 +398,6 @@ static void execute_next_query(PGquery *pg)
         pg->query_queue_tail = NULL;
     }
 
-    // Send query asynchronously
     int result;
     if (pg->current_query->param_count > 0)
     {
@@ -549,7 +510,6 @@ PGquery *query_create(PGconn *existing_conn, void *data)
         return NULL;
     }
 
-    // Initialize all fields
     memset(pg, 0, sizeof(PGquery));
     pg->conn = existing_conn;
     pg->data = data;
@@ -561,7 +521,6 @@ PGquery *query_create(PGconn *existing_conn, void *data)
     pg->query_queue_tail = NULL;
     pg->current_query = NULL;
 
-    // Initialize handle data pointer
 #ifdef _WIN32
     pg->timer.data = pg;
 #else
@@ -584,7 +543,6 @@ int query_queue(PGquery *pg,
         return -1;
     }
 
-    // Allocate query structure
     pg_query_t *query = malloc(sizeof(pg_query_t));
     if (!query)
     {
@@ -595,7 +553,6 @@ int query_queue(PGquery *pg,
     memset(query, 0, sizeof(pg_query_t));
     query->next = NULL;
 
-    // Copy SQL string
     query->sql = strdup(sql);
     if (!query->sql)
     {
@@ -604,7 +561,6 @@ int query_queue(PGquery *pg,
         return -1;
     }
 
-    // Copy parameters if any
     if (param_count > 0 && params)
     {
         query->params = malloc(param_count * sizeof(char *));
@@ -634,7 +590,7 @@ int query_queue(PGquery *pg,
                     free(query->params);
                     free(query->sql);
                     free(query);
-                    return -1
+                    return -1;
                 }
             }
             else
@@ -652,7 +608,6 @@ int query_queue(PGquery *pg,
     query->result_cb = result_cb;
     query->data = query_data;
 
-    // Add to queue
     if (!pg->query_queue)
     {
         pg->query_queue = pg->query_queue_tail = query;
@@ -688,12 +643,10 @@ int query_execute(PGquery *pg)
 
     if (!pg->query_queue)
     {
-        // No queries - cleanup immediately
         free_pgquery(pg);
         return 0;
     }
 
-    // Track async work
     increment_async_work();
 
     pg->is_executing = 1;

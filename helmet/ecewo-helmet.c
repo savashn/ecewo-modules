@@ -41,7 +41,6 @@ static void helmet_set_defaults(void)
     if (!helmet_state.xss_protection)
         helmet_state.xss_protection = DEFAULT_XSS_PROTECTION;
 
-    // Bool defaults (if not explicitly set)
     // nosniff and ie_no_open are true by default
 }
 
@@ -51,16 +50,14 @@ static void helmet_set_defaults(void)
 
 static int helmet_middleware(Req *req, Res *res, Chain *chain)
 {
-    (void)req; // Unused
+    (void)req;
 
     if (!helmet_state.enabled)
         return next(req, res, chain);
 
-    // Content Security Policy
     if (helmet_state.csp)
         set_header(res, "Content-Security-Policy", helmet_state.csp);
 
-    // HSTS - Build dynamically in request arena
     if (helmet_state.hsts_max_age)
     {
         char *hsts = ecewo_sprintf(res, "max-age=%s", helmet_state.hsts_max_age);
@@ -78,23 +75,18 @@ static int helmet_middleware(Req *req, Res *res, Chain *chain)
         set_header(res, "Strict-Transport-Security", hsts);
     }
 
-    // X-Frame-Options
     if (helmet_state.frame_options)
         set_header(res, "X-Frame-Options", helmet_state.frame_options);
 
-    // X-Content-Type-Options
     if (helmet_state.nosniff)
         set_header(res, "X-Content-Type-Options", "nosniff");
 
-    // X-XSS-Protection
     if (helmet_state.xss_protection)
         set_header(res, "X-XSS-Protection", helmet_state.xss_protection);
 
-    // Referrer-Policy
     if (helmet_state.referrer_policy)
         set_header(res, "Referrer-Policy", helmet_state.referrer_policy);
 
-    // X-Download-Options (IE only)
     if (helmet_state.ie_no_open)
         set_header(res, "X-Download-Options", "noopen");
 
@@ -130,8 +122,8 @@ void helmet_init(const Helmet *config)
         helmet_state.frame_options = NULL;
         helmet_state.referrer_policy = NULL;
         helmet_state.xss_protection = NULL;
-        helmet_state.nosniff = true;    // Default true
-        helmet_state.ie_no_open = true; // Default true
+        helmet_state.nosniff = true;
+        helmet_state.ie_no_open = true;
     }
 
     helmet_set_defaults();

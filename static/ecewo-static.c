@@ -76,7 +76,6 @@ static const char *get_mime_type(const char *path)
 
 static bool is_safe_path(const char *path)
 {
-    // Check for path traversal attempts
     if (strstr(path, "..") != NULL)
         return false;
 
@@ -165,7 +164,6 @@ static void on_file_read(FSRequest *fs_req, const char *error)
         return;
     }
 
-    // Send file with MIME type
     reply(res, 200, ctx->mime_type, fs_req->data, fs_req->size);
     remove_file_context(res);
 }
@@ -198,7 +196,6 @@ void send_file(Res *res, const char *filepath)
 
     save_file_context(res, ctx);
 
-    // Read file - pass Res, not ctx
     fs_read_file(res, filepath, on_file_read);
 }
 
@@ -214,7 +211,6 @@ typedef struct
     Static options;
 } static_ctx_t;
 
-// Dynamic array for static contexts
 typedef struct
 {
     static_ctx_t **items;
@@ -245,32 +241,26 @@ static void static_handler(Req *req, Res *res)
 {
     const char *url_path = req->path;
 
-    // Try each registered static mount
     for (int i = 0; i < static_contexts.count; i++)
     {
         static_ctx_t *ctx = static_contexts.items[i];
 
-        // Check if URL matches mount path
         if (strncmp(url_path, ctx->mount_path, ctx->mount_len) != 0)
             continue;
 
-        // Get relative path
         const char *rel_path = url_path + ctx->mount_len;
         if (*rel_path == '/')
             rel_path++;
 
-        // Check for dot files
         if (!ctx->options.dot_files && *rel_path == '.')
         {
             send_text(res, 403, "Forbidden");
             return;
         }
 
-        // If empty or ends with /, try index file
         int is_dir = (*rel_path == '\0' ||
                       (strlen(rel_path) > 0 && rel_path[strlen(rel_path) - 1] == '/'));
 
-        // Build file path
         char *filepath;
         if (is_dir)
         {
@@ -282,19 +272,16 @@ static void static_handler(Req *req, Res *res)
             filepath = ecewo_sprintf(res, "%s/%s", ctx->dir_path, rel_path);
         }
 
-        // Security check
         if (!is_safe_path(filepath))
         {
             send_text(res, 403, "Forbidden");
             return;
         }
 
-        // Send file
         send_file(res, filepath);
         return;
     }
 
-    // No match - 404
     send_text(res, 404, "Not found");
 }
 
@@ -308,7 +295,6 @@ void serve_static(const char *mount_path,
         return;
     }
 
-    // Default options if NULL provided
     Static default_opts = {
         .index_file = "index.html",
         .enable_etag = false,
@@ -322,7 +308,6 @@ void serve_static(const char *mount_path,
         options = &default_opts;
     }
 
-    // Ensure capacity
     ensure_static_capacity();
     if (static_contexts.count >= static_contexts.capacity)
     {
@@ -330,7 +315,6 @@ void serve_static(const char *mount_path,
         return;
     }
 
-    // Allocate context (long-lived, not arena)
     static_ctx_t *ctx = malloc(sizeof(static_ctx_t));
     if (!ctx)
     {
@@ -345,7 +329,6 @@ void serve_static(const char *mount_path,
 
     static_contexts.items[static_contexts.count++] = ctx;
 
-    // Register wildcard route
     char *route_pattern = malloc(strlen(mount_path) + 4);
     if (mount_path[strlen(mount_path) - 1] == '/')
     {

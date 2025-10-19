@@ -8,7 +8,6 @@
 
 static char *make_error_msg(void *context, int errcode)
 {
-    // Use framework macros - works with both Req and Res
     Req *req = (Req *)context;
     return ecewo_sprintf(req, "%s: %s",
                          uv_err_name(errcode),
@@ -54,7 +53,6 @@ static void read_data_cb(uv_fs_t *req)
 
     uv_fs_req_cleanup(req);
 
-    // Close file
     fs_req->fs_req.data = ctx;
     uv_fs_close(get_loop(), &fs_req->fs_req, ctx->file, read_close_cb);
 }
@@ -76,7 +74,6 @@ static void read_open_cb(uv_fs_t *req)
     ctx->file = (uv_file)req->result;
     uv_fs_req_cleanup(req);
 
-    // Allocate buffer using framework macro
     fs_req->data = ecewo_alloc(request, ctx->file_size + 1);
     if (!fs_req->data)
     {
@@ -85,7 +82,6 @@ static void read_open_cb(uv_fs_t *req)
         return;
     }
 
-    // Read file
     uv_buf_t buf = uv_buf_init(fs_req->data, (unsigned int)ctx->file_size);
     fs_req->fs_req.data = ctx;
     uv_fs_read(get_loop(), &fs_req->fs_req, ctx->file, &buf, 1, 0, read_data_cb);
@@ -107,7 +103,6 @@ static void read_stat_cb(uv_fs_t *req)
     ctx->file_size = (size_t)req->statbuf.st_size;
     uv_fs_req_cleanup(req);
 
-    // Open file
     fs_req->fs_req.data = ctx;
     uv_fs_open(get_loop(), &fs_req->fs_req, (const char *)fs_req->data,
                UV_FS_O_RDONLY, 0, read_open_cb);
@@ -128,7 +123,6 @@ void fs_read_file(void *context, const char *path, fs_callback_t callback)
 
     Req *req = (Req *)context;
 
-    // Use framework macros for allocation
     fs_req = ecewo_alloc(req, sizeof(FSRequest));
     if (!fs_req)
     {
@@ -153,7 +147,6 @@ void fs_read_file(void *context, const char *path, fs_callback_t callback)
     path_copy = ecewo_strdup(req, path);
     fs_req->data = (char *)path_copy;
 
-    // Start with stat
     fs_req->fs_req.data = ctx;
     result = uv_fs_stat(get_loop(), &fs_req->fs_req, path_copy, read_stat_cb);
 
@@ -201,7 +194,6 @@ static void write_data_cb(uv_fs_t *req)
     fs_req->size = (size_t)req->result;
     uv_fs_req_cleanup(req);
 
-    // Close file
     fs_req->fs_req.data = ctx;
     uv_fs_close(get_loop(), &fs_req->fs_req, ctx->file, write_close_cb);
 }
@@ -222,7 +214,6 @@ static void write_open_cb(uv_fs_t *req)
     ctx->file = (uv_file)req->result;
     uv_fs_req_cleanup(req);
 
-    // Write data
     fs_req->fs_req.data = ctx;
     uv_fs_write(get_loop(), &fs_req->fs_req, ctx->file, &ctx->buf, 1, 0, write_data_cb);
 }
@@ -244,7 +235,6 @@ void fs_write_file(void *context, const char *path,
 
     Req *req = (Req *)context;
 
-    // Use framework macros
     fs_req = ecewo_alloc(req, sizeof(FSRequest));
     if (!fs_req)
     {
@@ -266,7 +256,6 @@ void fs_write_file(void *context, const char *path,
     memset(ctx, 0, sizeof(write_ctx_t));
     ctx->fs_req = fs_req;
 
-    // Copy data using framework macro
     data_copy = ecewo_memdup(req, (void *)data, size);
     if (!data_copy)
     {
@@ -277,7 +266,6 @@ void fs_write_file(void *context, const char *path,
     ctx->buf = uv_buf_init(data_copy, (unsigned int)size);
     path_copy = ecewo_strdup(req, path);
 
-    // Open file
     fs_req->fs_req.data = ctx;
     result = uv_fs_open(get_loop(), &fs_req->fs_req, path_copy,
                         UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_TRUNC,
@@ -334,7 +322,6 @@ void fs_append_file(void *context, const char *path,
     ctx->buf = uv_buf_init(data_copy, (unsigned int)size);
     path_copy = ecewo_strdup(req, path);
 
-    // Open in append mode
     fs_req->fs_req.data = ctx;
     result = uv_fs_open(get_loop(), &fs_req->fs_req, path_copy,
                         UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_APPEND,

@@ -67,7 +67,6 @@ static int cors_middleware(Req *req, Res *res, Chain *chain)
 
     const char *request_origin = get_header(req, "Origin");
 
-    // Handle OPTIONS preflight
     if (req->method && strcmp(req->method, "OPTIONS") == 0)
     {
         if (request_origin && !is_origin_allowed(request_origin))
@@ -76,7 +75,6 @@ static int cors_middleware(Req *req, Res *res, Chain *chain)
             return -1;
         }
 
-        // Add CORS headers
         if (strcmp(cors_state.origin, "*") == 0)
         {
             set_header(res, "Access-Control-Allow-Origin", "*");
@@ -95,7 +93,6 @@ static int cors_middleware(Req *req, Res *res, Chain *chain)
         return -1;
     }
 
-    // Normal requests
     bool should_add = false;
 
     if (strcmp(cors_state.origin, "*") == 0)
