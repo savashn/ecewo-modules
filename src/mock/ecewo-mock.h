@@ -1,8 +1,7 @@
-#ifndef ECEWO_MOCK_H
-#define ECEWO_MOCK_H
+#ifndef MOCK_H
+#define MOCK_H
 
 #include <stdint.h>
-#include <stddef.h>
 
 typedef enum
 {
@@ -39,8 +38,8 @@ typedef void (*test_routes_cb_t)(void);
 void free_request(MockResponse *res);
 MockResponse request(MockParams *params);
 
-int ecewo_test_setup(void);
-int ecewo_test_tear_down(int num_failures);
+int mock_setup(void);
+void mock_down(void);
 
 void test_routes_hook(test_routes_cb_t callback);
 
