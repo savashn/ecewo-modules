@@ -1,8 +1,6 @@
 # TESTING
 
-Ecewo comes with [Unity Test Framework](https://github.com/ThrowTheSwitch/Unity) for writing tests and [`ecewo-mock.h`](/include/ecewo-mock.h) for mocking HTTP requests.
-
-The `ecewo-mock.h` file provides a lightweight HTTP testing module for Ecewo applications. It allows you to test your routes, handlers, and middleware without starting an actual HTTP server.
+The `ecewo-mock.h` file provides a lightweight HTTP mocking module for Ecewo applications. It allows you to test your routes, handlers, and middleware without starting an actual HTTP server.
 
 ## Table of Contents
 
@@ -15,20 +13,13 @@ The `ecewo-mock.h` file provides a lightweight HTTP testing module for Ecewo app
     1. [`request()`](#request)
     2. [`free_request()`](#free_request)
     3. [`test_routes_hook()`](#test_routes_hook)
-    4. [`ecewo_test_setup()`](#ecewo_test_setup)
-    5. [`ecewo_test_tear_down()`](#ecewo_test_tear_down)
+    4. [`mock_setup()`](#mock_setup)
+    5. [`mock_down()`](#mock_down)
 3. [Usage](#usage)
 
 > [!NOTE]
 >
-> Refer to the [Unity Documentation](https://github.com/ThrowTheSwitch/Unity/blob/master/docs/UnityAssertionsReference.md) for its API. This documentation is based on mocking HTTP requests.
-
-**Use with:**
-
-```c
-#include "ecewo-mock.h"
-#include "unity.h"
-```
+> This module is for mocking HTTP request only. It doesn't provide assert macros. The assert macros used in this documentation were taken from the [savashn/myassert](https://github.com/savashn/myassert) repository.
 
 ## Types
 
@@ -110,7 +101,7 @@ MockParams params = {
 };
 
 MockResponse res = request(&params);
-TEST_ASSERT_EQUAL(200, res.status_code);
+ASSERT_EQ(200, res.status_code);
 free_request(&res);
 ```
 
@@ -160,128 +151,32 @@ int main(void) {
 }
 ```
 
-### `ecewo_test_setup()`
+### `mock_setup()`
 
 Initialize the mock testing environment:
 
 ```c
-int ecewo_test_setup(void);
+int mock_setup(void);
 ```
 
 **Returns:**
 
 `0` on success, non-zero on error
 
-> [!NOTE]
->
-> This is typically called in `suiteSetUp()`
-
-### `ecewo_test_tear_down()`
+### `mock_down()`
 
 Clean up the mock testing environment:
 
 ```c
-int ecewo_test_tear_down(int num_failures);
+void mock_down(void);
 ```
-
-**Parameters:**
-
-`num_failures`: Number of failed tests (from `UNITY_END()`)
-
-**Returns:**
-
-Number of failures passed in.
-
-> [!NOTE]
->
-> This is typically called in `suiteTearDown()`
 
 ## Usage
 
-### Example Folder Structure
-
-Let's say we have a folder structure like the following one:
-
-myproject/
-├── CMakeLists.txt
-├── src/
-└── tests/
-    ├── CMakeLists.txt
-    └── test-runner.c
-
-### CMake Configuration
-
-We have 2 different `CMakeLists.txt` file. One of them is the main one that exists in the root directory, and the other one will be in the `tests/` folder and only responsible for our tests.
-
-First, we need to enable `ECEWO_TEST` module in our main `CMakeLists.txt` file while fetching Ecewo:
-
-```cmake
-include(FetchContent)
-
-FetchContent_Declare(
-    ecewo
-    GIT_REPOSITORY https://github.com/savashn/ecewo.git
-    GIT_TAG v2.3.1
-)
-
-set(ECEWO_TEST ON CACHE BOOL "Enable test module" FORCE)
-
-FetchContent_MakeAvailable(ecewo)
-```
-
-And then, we need to create a `BUILD_TEST` option for our application. Let's add the following code to the bottom of our main `CMakeLists.txt`:
-
-```cmake
-option(BUILD_TESTS "Build tests" OFF)
-
-if(BUILD_TESTS)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
-```
-
-Now we need to create a new `CMakeLists.txt` file in our `tests/` folder to compile our tests when our project has been building with `BUILD_TESTS` option:
-
-```cmake
-add_executable(project_test
-    test-runner.c
-)
-
-target_link_libraries(project_test PRIVATE
-    ecewo
-)
-
-target_include_directories(project_test PRIVATE
-    ${CMAKE_SOURCE_DIR}/tests
-)
-```
-
-### `test-runner.c` Configuration
-
 ```c
-#include "unity.h"
 #include "ecewo.h"
 #include "ecewo-mock.h"
-
-void setUp(void)
-{
-    // Per-test setup
-}
-
-void tearDown(void)
-{
-    // Per-test teardown
-}
-
-void suiteSetUp(void)
-{
-    ecewo_test_setup();
-}
-
-int suiteTearDown(int num_failures)
-{
-    ecewo_test_tear_down(num_failures);
-}
+#include "myassert.h"
 
 void handler_new_user(Req *req, Res *res)
 {
@@ -314,7 +209,7 @@ void handler_new_user(Req *req, Res *res)
     send_text(res, CREATED, "Success!");
 }
 
-void test_new_user(void)
+int test_new_user(void)
 {
     MockHeaders headers[] = {
         {"Authorization", "Bearer secret-token"},
@@ -334,10 +229,12 @@ void test_new_user(void)
 
     MockResponse res = request(&params);
 
-    TEST_ASSERT_EQUAL(201, res.status_code);
-    TEST_ASSERT_EQUAL_STRING("Success!", res.body);
+    ASSERT_EQ(201, res.status_code);
+    ASSERT_EQ_STR("Success!", res.body);
 
     free_request(&res);
+    
+    RETURN_OK();
 }
 
 void setup_routes(void)
@@ -348,28 +245,11 @@ void setup_routes(void)
 int main(void)
 {
     test_routes_hook(setup_routes);
-    suiteSetUp();
-    UNITY_BEGIN();
+    mock_setup();
 
     RUN_TEST(test_new_user);
 
-    int result = UNITY_END();
-    suiteTearDown(result);
-    return result;
+    mock_down();
+    return 0;
 }
 ```
-
-See the more advanced usage in [tests](/tests/).
-
-### Build
-
-Let's build and run our tests.
-
-```
-mkdir build
-cd build
-cmake -DBUILD_TESTS=ON ..
-cmake --build .
-```
-
-Our executable file can be found in `build/tests/project_test`. Now we can run it and see the results of our tests.
