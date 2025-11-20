@@ -1,0 +1,99 @@
+# CORS
+
+## Table of Contents
+
+1. [API](#api)
+2. [Default CORS Configuration](#default-cors-configuration)
+3. [Custom CORS Configuration](#custom-cors-configuration)
+
+## API
+
+```c
+typedef struct
+{
+    const char *origin;      // Default: "*"
+    const char *methods;     // Default: "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    const char *headers;     // Default: "Content-Type"
+    const char *credentials; // Default: "false"
+    const char *max_age;     // Default: "3600"
+} Cors;
+
+void cors_init(const Cors *config);
+```
+
+## Default CORS Configuration
+
+```c
+#include "ecewo.h"
+#include "ecewo-cors.h"
+#include <stdio.h>
+
+int main(void)
+{
+    if (server_init() != SERVER_OK)
+    {
+        fprintf(stderr, "Failed to initialize server\n");
+        return 1;
+    }
+
+    // Register CORS with default settings
+    cors_init(NULL);
+
+    get("/", example_handler);
+
+    if (server_listen(3000) != SERVER_OK)
+    {
+        fprintf(stderr, "Failed to start server\n");
+        return 1;
+    }
+
+    server_run();
+    return 0;
+}
+```
+
+## Custom CORS Configuration
+
+```c
+// main.c
+
+#include "ecewo.h"
+#include "ecewo-cors.h"
+#include <stdio.h>
+
+// Configure CORS
+static const Cors cors_config = {
+    .origin = "http://localhost:3000",        // Default "*"
+    .methods = "GET, POST, OPTIONS",          // Default "GET, POST, PUT, DELETE, OPTIONS"
+    .headers = "Content-Type, Authorization", // Default "Content-Type"
+    .credentials = "true",                    // Default "false"
+    .max_age = "86400",                       // Default "3600"
+};
+
+int main(void)
+{
+    if (server_init() != SERVER_OK)
+    {
+        fprintf(stderr, "Failed to initialize server\n");
+        return 1;
+    }
+
+    // Register CORS with custom settings
+    cors_init(&cors_config);
+
+    get("/", example_handler);
+
+    if (server_listen(3000) != SERVER_OK)
+    {
+        fprintf(stderr, "Failed to start server\n");
+        return 1;
+    }
+
+    server_run();
+    return 0;
+}
+```
+
+> [!IMPORTANT]
+> 
+> All strings in `CORS` config must have static lifetime.
