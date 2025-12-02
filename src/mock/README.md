@@ -12,9 +12,8 @@ The `ecewo-mock.h` file provides a lightweight HTTP mocking module for Ecewo app
 2. [Functions](#functions)
     1. [`request()`](#request)
     2. [`free_request()`](#free_request)
-    3. [`test_routes_hook()`](#test_routes_hook)
-    4. [`mock_setup()`](#mock_setup)
-    5. [`mock_down()`](#mock_down)
+    3. [`mock_init()`](#mock_setup)
+    4. [`mock_cleanup()`](#mock_cleanup)
 3. [Usage](#usage)
 
 > [!NOTE]
@@ -54,11 +53,11 @@ Parameters for creating a mock HTTP request:
 
 ```c
 typedef struct {
-    MockMethod method;          // HTTP method
-    const char *path;           // Request path (e.g., "/users/123")
-    const char *body;           // Request body (optional, can be NULL)
-    MockHeaders *headers;       // Array of headers (optional)
-    size_t header_count;        // Number of headers
+    MockMethod method;      // HTTP method
+    const char *path;       // Request path (e.g., "/users/123")
+    const char *body;       // Request body (optional, can be NULL)
+    MockHeaders *headers;   // Array of headers (optional)
+    size_t header_count;    // Number of headers
 } MockParams;
 ```
 
@@ -68,9 +67,9 @@ Response returned by the mock module:
 
 ```c
 typedef struct {
-    uint16_t status_code;       // HTTP status code (e.g., 200, 404)
-    char *body;                 // Response body
-    size_t body_len;            // Length of response body
+    uint16_t status_code;   // HTTP status code (e.g., 200, 404)
+    char *body;             // Response body
+    size_t body_len;        // Length of response body
 } MockResponse;
 ```
 
@@ -125,50 +124,28 @@ MockResponse res = request(&params);
 free_request(&res);  // Always call this!
 ```
 
-### `test_routes_hook()`
-
-Register routes for testing:
-
-```c
-void test_routes_hook(test_routes_cb_t callback);
-```
-
-**Parameters:**
-
-`callback`: Function that sets up routes
-
-**Example:**
-
-```c
-void setup_routes(void) {
-    get("/hello", hello_handler);
-    post("/users", create_user);
-}
-
-int main(void) {
-    test_routes_hook(setup_routes);
-    // ... run tests ...
-}
-```
-
-### `mock_setup()`
+### `mock_init()`
 
 Initialize the mock testing environment:
 
 ```c
-int mock_setup(void);
+int mock_init(test_routes_cb_t routes_callback);
 ```
+
+**Parameters:**
+
+`routes_callback`: A callback that registers the routes.
 
 **Returns:**
 
 `0` on success, non-zero on error
 
-### `mock_down()`
+### `mock_cleanup()`
 
 Clean up the mock testing environment:
 
 ```c
-void mock_down(void);
+void mock_cleanup(void);
 ```
 
 ## Usage
@@ -244,12 +221,11 @@ void setup_routes(void)
 
 int main(void)
 {
-    test_routes_hook(setup_routes);
-    mock_setup();
+    mock_init(setup_routes);
 
     RUN_TEST(test_new_user);
 
-    mock_down();
+    mock_cleanup();
     return 0;
 }
 ```
