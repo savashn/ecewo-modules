@@ -9,7 +9,8 @@ typedef enum
     MOCK_POST,
     MOCK_PUT,
     MOCK_DELETE,
-    MOCK_PATCH
+    MOCK_PATCH,
+    MOCK_OPTIONS
 } MockMethod;
 
 typedef struct

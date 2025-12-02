@@ -204,6 +204,7 @@ static char *build_http_request(MockParams *params)
         case MOCK_PUT:    method = "PUT"; break;
         case MOCK_PATCH:  method = "PATCH"; break;
         case MOCK_DELETE: method = "DELETE"; break;
+        case MOCK_OPTIONS: method = "OPTIONS"; break;
     }
 
     len += snprintf(request + len, buffer_size - len,

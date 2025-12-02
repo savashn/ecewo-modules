@@ -32,7 +32,8 @@ typedef enum {
     POST,
     PUT,
     DELETE,
-    PATCH
+    PATCH,
+    OPTIONS
 } MockMethod;
 ```
 
