@@ -50,8 +50,6 @@ static void helmet_set_defaults(void)
 
 static int helmet_middleware(Req *req, Res *res, Chain *chain)
 {
-    (void)req;
-
     if (!helmet_state.enabled)
         return next(req, res, chain);
 
@@ -60,17 +58,13 @@ static int helmet_middleware(Req *req, Res *res, Chain *chain)
 
     if (helmet_state.hsts_max_age)
     {
-        char *hsts = ecewo_sprintf(res, "max-age=%s", helmet_state.hsts_max_age);
+        char *hsts = arena_sprintf(req->arena, "max-age=%s", helmet_state.hsts_max_age);
 
         if (helmet_state.hsts_subdomains)
-        {
-            hsts = ecewo_sprintf(res, "%s; includeSubDomains", hsts);
-        }
+            hsts = arena_sprintf(req->arena, "%s; includeSubDomains", hsts);
 
         if (helmet_state.hsts_preload)
-        {
-            hsts = ecewo_sprintf(res, "%s; preload", hsts);
-        }
+            hsts = arena_sprintf(req->arena, "%s; preload", hsts);
 
         set_header(res, "Strict-Transport-Security", hsts);
     }

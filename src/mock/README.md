@@ -176,7 +176,7 @@ void handler_new_user(Req *req, Res *res)
     const char *expected_body = "{\"name\":\"John\",\"age\":30}";
     if (strcmp(req->body, expected_body) != 0)
     {
-        char *error = ecewo_sprintf(res, 
+        char *error = arena_sprintf(req->arena, 
             "Body mismatch. Expected: %s, Got: %s", 
             expected_body, req->body);
         send_text(res, BAD_REQUEST, error);

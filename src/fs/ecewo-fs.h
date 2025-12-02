@@ -5,8 +5,6 @@
 #include "ecewo.h"
 #include "uv.h"
 
-typedef struct Req Req;
-typedef struct Res Res;
 typedef struct FSRequest FSRequest;
 
 typedef void (*fs_callback_t)(FSRequest *req, const char *error);

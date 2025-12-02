@@ -258,7 +258,7 @@ static void on_read(FSRequest *fs_req, const char *error)
     
     if (error)
     {
-        char *msg = ecewo_sprintf(res, "Error: %s", error);
+        char *msg = arena_sprintf(res->arena, "Error: %s", error);
         send_text(res, 500, msg);
         return;
     }
@@ -321,7 +321,7 @@ void fs_append_file(void *context,
 ```c
 void log_handler(Req *req, Res *res)
 {
-    char *log = ecewo_sprintf(req, "[%ld] %s\n", time(NULL), req->body);
+    char *log = arena_sprintf(req->arena, "[%ld] %s\n", time(NULL), req->body);
     
     fs_append_file(req, "app.log", log, strlen(log), on_logged);
 }
@@ -358,7 +358,7 @@ static void on_stat(FSRequest *fs_req, const char *error)
         return;
     }
     
-    char *response = ecewo_sprintf(res,
+    char *response = arena_sprintf(res->arena,
         "{"
         "\"size\":%lld,"
         "\"modified\":%lld"
@@ -479,7 +479,7 @@ static void on_read(FSRequest *fs_req, const char *error)
     }
 
     // Process file content
-    char *processed = ecewo_sprintf(res, "PROCESSED: %s", fs_req->data);
+    char *processed = arena_sprintf(res->arena, "PROCESSED: %s", fs_req->data);
 
     // Write processed content
     fs_write_file(res, "output.txt", processed, strlen(processed), on_written);
@@ -515,7 +515,7 @@ static void send_combined_response(ParallelRead *ctx)
 {
     if (ctx->completed == ctx->total)
     {
-        char *response = ecewo_sprintf(ctx->res,
+        char *response = arena_sprintf(ctx->res->arena,
                                        "{"
                                        "\"file1\":\"%s\","
                                        "\"file2\":\"%s\","
@@ -537,7 +537,7 @@ static void on_file1(FSRequest *fs_req, const char *error)
 
     if (!error)
     {
-        ctx->file1_data = ecewo_strdup(res, fs_req->data);
+        ctx->file1_data = arena_strdup(res->arena, fs_req->data);
     }
 
     ctx->completed++;
@@ -551,7 +551,7 @@ static void on_file2(FSRequest *fs_req, const char *error)
 
     if (!error)
     {
-        ctx->file2_data = ecewo_strdup(res, fs_req->data);
+        ctx->file2_data = arena_strdup(res->arena, fs_req->data);
     }
 
     ctx->completed++;
@@ -565,7 +565,7 @@ static void on_file3(FSRequest *fs_req, const char *error)
 
     if (!error)
     {
-        ctx->file3_data = ecewo_strdup(res, fs_req->data);
+        ctx->file3_data = arena_strdup(res->arena, fs_req->data);
     }
 
     ctx->completed++;
@@ -574,7 +574,7 @@ static void on_file3(FSRequest *fs_req, const char *error)
 
 void parallel_handler(Req *req, Res *res)
 {
-    ParallelRead *ctx = ecewo_alloc(res, sizeof(ParallelRead));
+    ParallelRead *ctx = arena_alloc(req->arena, sizeof(ParallelRead));
     ctx->res = res;
     ctx->completed = 0;
     ctx->total = 3;
@@ -619,7 +619,7 @@ void upload_handler(Req *req, Res *res)
     }
     
     // Build safe path
-    char *filepath = ecewo_sprintf(res, "uploads/%s", filename);
+    char *filepath = arena_sprintf(req->arena, "uploads/%s", filename);
     
     // Save uploaded file
     fs_write_file(res, filepath, req->body, req->body_len, on_uploaded);

@@ -255,7 +255,7 @@ void download_handler(Req *req, Res *res)
         return;
     }
     
-    char *path = ecewo_sprintf(res, "./downloads/%s", file);
+    char *path = arena_sprintf(res->arena, "./downloads/%s", file);
     send_file(res, path);
 }
 ```

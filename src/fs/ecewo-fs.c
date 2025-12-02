@@ -9,7 +9,7 @@
 static char *make_error_msg(void *context, int errcode)
 {
     Req *req = (Req *)context;
-    return ecewo_sprintf(req, "%s: %s",
+    return arena_sprintf(req->arena, "%s: %s",
                          uv_err_name(errcode),
                          uv_strerror(errcode));
 }
@@ -74,7 +74,7 @@ static void read_open_cb(uv_fs_t *req)
     ctx->file = (uv_file)req->result;
     uv_fs_req_cleanup(req);
 
-    fs_req->data = ecewo_alloc(request, ctx->file_size + 1);
+    fs_req->data = arena_alloc(request->arena, ctx->file_size + 1);
     if (!fs_req->data)
     {
         uv_fs_close(get_loop(), &fs_req->fs_req, ctx->file, NULL);
@@ -123,7 +123,7 @@ void fs_read_file(void *context, const char *path, fs_callback_t callback)
 
     Req *req = (Req *)context;
 
-    fs_req = ecewo_alloc(req, sizeof(FSRequest));
+    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
     if (!fs_req)
     {
         fprintf(stderr, "fs_read_file: Memory allocation failed\n");
@@ -134,7 +134,7 @@ void fs_read_file(void *context, const char *path, fs_callback_t callback)
     fs_req->context = context;
     fs_req->callback = callback;
 
-    ctx = ecewo_alloc(req, sizeof(read_ctx_t));
+    ctx = arena_alloc(req->arena, sizeof(read_ctx_t));
     if (!ctx)
     {
         callback(fs_req, "Memory allocation failed");
@@ -144,7 +144,7 @@ void fs_read_file(void *context, const char *path, fs_callback_t callback)
     memset(ctx, 0, sizeof(read_ctx_t));
     ctx->fs_req = fs_req;
 
-    path_copy = ecewo_strdup(req, path);
+    path_copy = arena_strdup(req->arena, path);
     fs_req->data = (char *)path_copy;
 
     fs_req->fs_req.data = ctx;
@@ -235,7 +235,7 @@ void fs_write_file(void *context, const char *path,
 
     Req *req = (Req *)context;
 
-    fs_req = ecewo_alloc(req, sizeof(FSRequest));
+    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
     if (!fs_req)
     {
         fprintf(stderr, "fs_write_file: Memory allocation failed\n");
@@ -246,7 +246,7 @@ void fs_write_file(void *context, const char *path,
     fs_req->context = context;
     fs_req->callback = callback;
 
-    ctx = ecewo_alloc(req, sizeof(write_ctx_t));
+    ctx = arena_alloc(req->arena, sizeof(write_ctx_t));
     if (!ctx)
     {
         callback(fs_req, "Memory allocation failed");
@@ -256,7 +256,7 @@ void fs_write_file(void *context, const char *path,
     memset(ctx, 0, sizeof(write_ctx_t));
     ctx->fs_req = fs_req;
 
-    data_copy = ecewo_memdup(req, (void *)data, size);
+    data_copy = arena_memdup(req->arena, (void *)data, size);
     if (!data_copy)
     {
         callback(fs_req, "Memory allocation failed");
@@ -264,7 +264,7 @@ void fs_write_file(void *context, const char *path,
     }
 
     ctx->buf = uv_buf_init(data_copy, (unsigned int)size);
-    path_copy = ecewo_strdup(req, path);
+    path_copy = arena_strdup(req->arena, path);
 
     fs_req->fs_req.data = ctx;
     result = uv_fs_open(get_loop(), &fs_req->fs_req, path_copy,
@@ -295,8 +295,8 @@ void fs_append_file(void *context, const char *path,
 
     Req *req = (Req *)context;
 
-    fs_req = ecewo_alloc(req, sizeof(FSRequest));
-    ctx = ecewo_alloc(req, sizeof(write_ctx_t));
+    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
+    ctx = arena_alloc(req->arena, sizeof(write_ctx_t));
 
     if (!fs_req || !ctx)
     {
@@ -312,7 +312,7 @@ void fs_append_file(void *context, const char *path,
     fs_req->callback = callback;
     ctx->fs_req = fs_req;
 
-    data_copy = ecewo_memdup(req, (void *)data, size);
+    data_copy = arena_memdup(req->arena, (void *)data, size);
     if (!data_copy)
     {
         callback(fs_req, "Memory allocation failed");
@@ -320,7 +320,7 @@ void fs_append_file(void *context, const char *path,
     }
 
     ctx->buf = uv_buf_init(data_copy, (unsigned int)size);
-    path_copy = ecewo_strdup(req, path);
+    path_copy = arena_strdup(req->arena, path);
 
     fs_req->fs_req.data = ctx;
     result = uv_fs_open(get_loop(), &fs_req->fs_req, path_copy,
@@ -366,7 +366,7 @@ void fs_stat(void *context, const char *path, fs_callback_t callback)
         return;
 
     Req *req = (Req *)context;
-    fs_req = ecewo_alloc(req, sizeof(FSRequest));
+    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
     if (!fs_req)
         return;
 
@@ -375,7 +375,7 @@ void fs_stat(void *context, const char *path, fs_callback_t callback)
     fs_req->callback = callback;
     fs_req->fs_req.data = fs_req;
 
-    path_copy = ecewo_strdup(req, path);
+    path_copy = arena_strdup(req->arena, path);
     result = uv_fs_stat(get_loop(), &fs_req->fs_req, path_copy, simple_op_cb);
 
     if (result < 0)
@@ -395,7 +395,7 @@ void fs_unlink(void *context, const char *path, fs_callback_t callback)
         return;
 
     Req *req = (Req *)context;
-    fs_req = ecewo_alloc(req, sizeof(FSRequest));
+    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
     if (!fs_req)
         return;
 
@@ -404,7 +404,7 @@ void fs_unlink(void *context, const char *path, fs_callback_t callback)
     fs_req->callback = callback;
     fs_req->fs_req.data = fs_req;
 
-    path_copy = ecewo_strdup(req, path);
+    path_copy = arena_strdup(req->arena, path);
     result = uv_fs_unlink(get_loop(), &fs_req->fs_req, path_copy, simple_op_cb);
 
     if (result < 0)
@@ -426,7 +426,7 @@ void fs_rename(void *context, const char *old_path, const char *new_path,
         return;
 
     Req *req = (Req *)context;
-    fs_req = ecewo_alloc(req, sizeof(FSRequest));
+    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
     if (!fs_req)
         return;
 
@@ -435,8 +435,8 @@ void fs_rename(void *context, const char *old_path, const char *new_path,
     fs_req->callback = callback;
     fs_req->fs_req.data = fs_req;
 
-    old_copy = ecewo_strdup(req, old_path);
-    new_copy = ecewo_strdup(req, new_path);
+    old_copy = arena_strdup(req->arena, old_path);
+    new_copy = arena_strdup(req->arena, new_path);
 
     result = uv_fs_rename(get_loop(), &fs_req->fs_req, old_copy, new_copy, simple_op_cb);
 
@@ -457,7 +457,7 @@ void fs_mkdir(void *context, const char *path, fs_callback_t callback)
         return;
 
     Req *req = (Req *)context;
-    fs_req = ecewo_alloc(req, sizeof(FSRequest));
+    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
     if (!fs_req)
         return;
 
@@ -466,7 +466,7 @@ void fs_mkdir(void *context, const char *path, fs_callback_t callback)
     fs_req->callback = callback;
     fs_req->fs_req.data = fs_req;
 
-    path_copy = ecewo_strdup(req, path);
+    path_copy = arena_strdup(req->arena, path);
     result = uv_fs_mkdir(get_loop(), &fs_req->fs_req, path_copy, 0755, simple_op_cb);
 
     if (result < 0)
@@ -486,7 +486,7 @@ void fs_rmdir(void *context, const char *path, fs_callback_t callback)
         return;
 
     Req *req = (Req *)context;
-    fs_req = ecewo_alloc(req, sizeof(FSRequest));
+    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
     if (!fs_req)
         return;
 
@@ -495,7 +495,7 @@ void fs_rmdir(void *context, const char *path, fs_callback_t callback)
     fs_req->callback = callback;
     fs_req->fs_req.data = fs_req;
 
-    path_copy = ecewo_strdup(req, path);
+    path_copy = arena_strdup(req->arena, path);
     result = uv_fs_rmdir(get_loop(), &fs_req->fs_req, path_copy, simple_op_cb);
 
     if (result < 0)

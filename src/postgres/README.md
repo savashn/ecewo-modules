@@ -252,7 +252,7 @@ void create_person_handler(Req *req, Res *res)
     const char *name = get_query(req, "name");
     const char *surname = get_query(req, "surname");
 
-    ctx_t *ctx = ecewo_alloc(req, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
     if (!ctx)
     {
         send_text(res, 500, "Context allocation failed");

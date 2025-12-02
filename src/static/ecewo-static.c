@@ -184,7 +184,7 @@ void send_file(Res *res, const char *filepath)
         return;
     }
 
-    send_file_ctx_t *ctx = ecewo_alloc(res, sizeof(send_file_ctx_t));
+    send_file_ctx_t *ctx = arena_alloc(res->arena, sizeof(send_file_ctx_t));
     if (!ctx)
     {
         send_text(res, 500, "Memory allocation failed");
@@ -268,16 +268,16 @@ static void static_handler(Req *req, Res *res)
         {
             if (strlen(rel_path) == 0)
             {
-                filepath = ecewo_sprintf(res, "%s/%s", ctx->dir_path, ctx->options.index_file);
+                filepath = arena_sprintf(req->arena, "%s/%s", ctx->dir_path, ctx->options.index_file);
             }
             else
             {
-                filepath = ecewo_sprintf(res, "%s/%s%s", ctx->dir_path, rel_path, ctx->options.index_file);
+                filepath = arena_sprintf(req->arena, "%s/%s%s", ctx->dir_path, rel_path, ctx->options.index_file);
             }
         }
         else
         {
-            filepath = ecewo_sprintf(res, "%s/%s", ctx->dir_path, rel_path);
+            filepath = arena_sprintf(req->arena, "%s/%s", ctx->dir_path, rel_path);
         }
 
         if (!is_safe_path(filepath))
