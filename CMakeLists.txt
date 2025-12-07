@@ -8,7 +8,7 @@ include(FetchContent)
 FetchContent_Declare(
     ecewo
     GIT_REPOSITORY https://github.com/savashn/ecewo.git
-    GIT_TAG main
+    GIT_TAG dev
     GIT_SHALLOW TRUE
 )
 
@@ -25,6 +25,12 @@ add_executable(modules_test
     src/static/ecewo-static.c
     tests/test-runner.c
     tests/test-cluster.c
+    tests/test-cookie.c
+    tests/test-cors.c
+    tests/test-helmet.c
+    tests/test-session.c
+    tests/test-fs.c
+    tests/test-static.c
 )
 
 target_link_libraries(modules_test PRIVATE ecewo)

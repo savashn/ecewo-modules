@@ -1,0 +1,263 @@
+name: CI
+
+on:
+  push:
+    branches: [ '*' ]
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**/*.md'
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  linux-build-test:
+    name: Linux (Ubuntu Latest)
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+    
+    - name: Configure CMake
+      run: |
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+          -DECEWO_BUILD_TESTS=ON
+    
+    - name: Build
+      run: cmake --build build --config ${{env.BUILD_TYPE}} -j$(nproc)
+    
+    - name: Run tests
+      working-directory: build
+      run: ctest -C ${{env.BUILD_TYPE}} --output-on-failure --verbose
+    
+    - name: Upload test results
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-test-results
+        path: build/Testing/Temporary/
+
+  macos-build-test:
+    name: macOS (Latest)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Cache CMake dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          build/_deps
+        key: ${{ runner.os }}-cmake-deps-${{ hashFiles('**/CMakeLists.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-cmake-deps-
+        
+    - name: Install dependencies
+      run: brew install cmake
+    
+    - name: Configure network for GitHub access
+      run: |
+        echo "Resolving GitHub IPs..."
+        nslookup github.com || true
+        curl -I https://github.com 2>&1 | head -n 5 || true
+        sudo dscacheutil -flushcache
+        sudo killall -HUP mDNSResponder 2>/dev/null || true
+        sleep 2
+    
+    - name: Configure CMake
+      run: |
+        MAX_ATTEMPTS=3
+        ATTEMPT=0
+        
+        until [ $ATTEMPT -ge $MAX_ATTEMPTS ]; do
+          ATTEMPT=$((ATTEMPT+1))
+          echo "Attempt $ATTEMPT of $MAX_ATTEMPTS..."
+          
+          if cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+            -DECEWO_BUILD_TESTS=ON; then
+            echo "CMake configuration successful!"
+            exit 0
+          fi
+          
+          if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+            echo "CMake failed, waiting 15 seconds before retry..."
+            sleep 15
+          fi
+        done
+        
+        echo "CMake configuration failed after $MAX_ATTEMPTS attempts"
+        exit 1
+    
+    - name: Build
+      run: cmake --build build --config ${{env.BUILD_TYPE}} -j$(sysctl -n hw.ncpu)
+    
+    - name: Run tests
+      working-directory: build
+      run: ctest -C ${{env.BUILD_TYPE}} --output-on-failure --verbose
+    
+    - name: Upload test results
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-test-results
+        path: build/Testing/Temporary/
+
+  windows-build-test:
+    name: Windows (Latest)
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure CMake
+      run: |
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+          -DECEWO_BUILD_TESTS=ON
+      shell: bash
+    
+    - name: Build
+      run: cmake --build build --config ${{env.BUILD_TYPE}} --parallel
+    
+    - name: Run tests
+      working-directory: build
+      run: ctest -C ${{env.BUILD_TYPE}} --output-on-failure --verbose
+
+  memory-check:
+    name: Memory Leak Check (Valgrind)
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential valgrind
+    
+    - name: Configure CMake (Debug)
+      run: |
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DECEWO_BUILD_TESTS=ON
+    
+    - name: Build
+      run: cmake --build build --config Debug
+    
+    - name: Run Valgrind on ecewo_test
+      working-directory: build
+      run: |
+        VALGRIND_OPTS="--leak-check=full \
+                      --error-exitcode=1 \
+                      --show-leak-kinds=definite,indirect,possible \
+                      --track-origins=yes \
+                      --verbose"
+        
+        echo "Running valgrind on: ecewo_test"
+        
+        if [ -x "ecewo_test" ]; then
+          timeout 300 valgrind $VALGRIND_OPTS ./ecewo_test || {
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 124 ]; then
+              echo "TIMEOUT: Test exceeded 300 seconds"
+            else
+              echo "FAILED: Test exited with code $EXIT_CODE"
+            fi
+            exit $EXIT_CODE
+          }
+        else
+          echo "ERROR: ecewo_test executable not found"
+          exit 1
+        fi
+    
+    - name: Upload Valgrind logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: valgrind-logs
+        path: build/*.log
+
+  asan-check:
+    name: Address Sanitizer Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+    
+    - name: Configure with ASAN
+      run: |
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DECEWO_BUILD_TESTS=ON \
+          -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
+    
+    - name: Build
+      run: cmake --build build
+    
+    - name: Run tests with ASAN
+      working-directory: build
+      env:
+        ASAN_OPTIONS: detect_leaks=1:halt_on_error=0
+        LSAN_OPTIONS: verbosity=1:print_suppressions=0
+      run: |
+        echo "Running ASAN on: ecewo_test"
+        
+        if [ ! -x "ecewo_test" ]; then
+          echo "ERROR: ecewo_test executable not found"
+          ls -la
+          exit 1
+        fi
+        
+        ./ecewo_test 2>&1 | tee test_output.log
+        EXIT_CODE=${PIPESTATUS[0]}
+        
+        echo ""
+        echo "Test exit code: $EXIT_CODE"
+        
+        if grep -q "Direct leak\|Indirect leak\|ERROR: LeakSanitizer" test_output.log; then
+          echo ""
+          echo "MEMORY LEAK DETECTED:"
+          grep -B 2 -A 30 "Direct leak\|Indirect leak\|ERROR: LeakSanitizer" test_output.log
+          exit 1
+        fi
+        
+        if grep -q "ERROR: AddressSanitizer" test_output.log; then
+          echo ""
+          echo "ADDRESS SANITIZER ERROR:"
+          grep -B 5 -A 20 "ERROR: AddressSanitizer" test_output.log
+          exit 1
+        fi
+        
+        if [ $EXIT_CODE -ne 0 ]; then
+          echo "Tests failed but no memory issues detected"
+          exit $EXIT_CODE
+        fi
+        
+    - name: Upload ASAN logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: asan-logs
+        path: build/test_output.log

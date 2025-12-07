@@ -20,12 +20,14 @@ typedef struct
     size_t body_len;
 } MockResponse;
 
-typedef struct {
+typedef struct
+{
     const char *key;
     const char *value;
 } MockHeaders;
 
-typedef struct {
+typedef struct
+{
     MockMethod method;
     const char *path;
     const char *body;
