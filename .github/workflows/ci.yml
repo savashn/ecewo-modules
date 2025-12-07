@@ -160,7 +160,7 @@ jobs:
     - name: Build
       run: cmake --build build --config Debug
     
-    - name: Run Valgrind on ecewo_test
+    - name: Run Valgrind on modules_test
       working-directory: build
       run: |
         VALGRIND_OPTS="--leak-check=full \
@@ -169,10 +169,10 @@ jobs:
                       --track-origins=yes \
                       --verbose"
         
-        echo "Running valgrind on: ecewo_test"
+        echo "Running valgrind on: modules_test"
         
-        if [ -x "ecewo_test" ]; then
-          timeout 300 valgrind $VALGRIND_OPTS ./ecewo_test || {
+        if [ -x "modules_test" ]; then
+          timeout 300 valgrind $VALGRIND_OPTS ./modules_test || {
             EXIT_CODE=$?
             if [ $EXIT_CODE -eq 124 ]; then
               echo "TIMEOUT: Test exceeded 300 seconds"
@@ -182,7 +182,7 @@ jobs:
             exit $EXIT_CODE
           }
         else
-          echo "ERROR: ecewo_test executable not found"
+          echo "ERROR: modules_test executable not found"
           exit 1
         fi
     
@@ -222,15 +222,15 @@ jobs:
         ASAN_OPTIONS: detect_leaks=1:halt_on_error=0
         LSAN_OPTIONS: verbosity=1:print_suppressions=0
       run: |
-        echo "Running ASAN on: ecewo_test"
+        echo "Running ASAN on: modules_test"
         
-        if [ ! -x "ecewo_test" ]; then
-          echo "ERROR: ecewo_test executable not found"
+        if [ ! -x "modules_test" ]; then
+          echo "ERROR: modules_test executable not found"
           ls -la
           exit 1
         fi
         
-        ./ecewo_test 2>&1 | tee test_output.log
+        ./modules_test 2>&1 | tee test_output.log
         EXIT_CODE=${PIPESTATUS[0]}
         
         echo ""
