@@ -70,9 +70,6 @@ void index_handler(Req *req, Res *res)
 
 int main(int argc, char *argv[])
 {
-    uint8_t workers;
-    workers = cluster_cpu_count();
-    
     Cluster config = {
         .workers = cluster_cpu_count(),  // Or give a specific count
         .respawn = true,                 // Respawn if one of them crash

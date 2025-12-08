@@ -1,3 +1,8 @@
+#ifdef __linux__
+#define _GNU_SOURCE
+#include <sys/prctl.h>
+#endif
+
 #include "uv.h"
 #include "ecewo.h"
 #include "ecewo-cluster.h"
@@ -10,8 +15,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#else
-
+#else // _WIN32
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
@@ -19,12 +23,7 @@
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <errno.h>
-
-#ifdef __linux__
-#include <sys/prctl.h>
-#endif
-
-#endif
+#endif // _WIN32
 
 #define RESPAWN_THROTTLE_COUNT 3
 #define RESPAWN_THROTTLE_WINDOW 5 // seconds
