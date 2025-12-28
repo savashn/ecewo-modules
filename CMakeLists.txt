@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.14)
 project(modules_test VERSION 1.0.0 LANGUAGES C)
-set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Debug)
 
@@ -8,7 +8,7 @@ include(FetchContent)
 FetchContent_Declare(
     ecewo
     GIT_REPOSITORY https://github.com/savashn/ecewo.git
-    GIT_TAG dev
+    GIT_TAG v3.0.0
     GIT_SHALLOW TRUE
 )
 

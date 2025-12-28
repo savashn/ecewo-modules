@@ -32,7 +32,7 @@ int main(void)
         return 1;
     }
 
-    shutdown_hook(cleanup_app);
+    server_atexit(cleanup_app);
     server_listen(3000);
     server_run();
     return 0;
@@ -64,7 +64,7 @@ void session_cleanup(void)
 
 > [!NOTE]
 >
-> Should be called in `shutdown_hook()`.
+> Should be called in `server_atexit()`.
 
 ### `session_find()`
 
@@ -187,7 +187,8 @@ void session_send(Res *res, Session *sess, Cookie *options)
 - **options:** Cookie options (can be NULL)
 
 ```c
-void handle_login(Req *req, Res *res) {
+void handle_login(Req *req, Res *res)
+{
     // User authentication...
 
     Session *sess = session_create(7200); // 2 hours
@@ -221,7 +222,8 @@ Session *session_get(Req *req)
 - **Return value:** Session pointer or NULL
 
 ```c
-void handle_protected_route(Req *req, Res *res) {
+void handle_protected_route(Req *req, Res *res)
+{
     // Get session from request
     Session *sess = session_get(req);
     if (!sess) {
@@ -254,7 +256,8 @@ void session_destroy(Res *res, Session *sess, Cookie *options)
 - **options:** Cookie options (can be NULL)
 
 ```c
-void handle_logout(Req *req, Res *res) {
+void handle_logout(Req *req, Res *res)
+{
     Session *sess = session_get(req);
     if (sess) {
         // Completely destroy session
@@ -276,7 +279,8 @@ void session_free(Session *sess)
 - **sess:** Session to be freed
 
 ```c
-void emergency_session_cleanup(char *session_id) {
+void emergency_session_cleanup(char *session_id)
+{
     Session *problematic_sess = session_find(session_id);
 
     if (problematic_sess) {

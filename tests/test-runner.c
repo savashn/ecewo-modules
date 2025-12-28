@@ -42,6 +42,9 @@ int main(void)
         printf("ERROR: Failed to initialize mock server\n");
         return 1;
     }
+
+    printf("DEBUG: Mock initialized, routes should be set up\n");
+    fflush(stdout);
     
     printf("\n--- Cookie Tests ---\n");
     RUN_TEST(test_cookie_set_simple);
@@ -66,12 +69,17 @@ int main(void)
     
     printf("\n--- File System Tests ---\n");
     RUN_TEST(test_fs_read_existing_file);
+    printf("DEBUG: After first FS test\n");
+    fflush(stdout);
     RUN_TEST(test_fs_read_nonexistent_file);
     RUN_TEST(test_fs_write_file);
     RUN_TEST(test_fs_stat_file);
     RUN_TEST(test_fs_missing_parameter);
     
     printf("\n--- Static File Tests ---\n");
+    fflush(stdout);
+    printf("DEBUG: About to run static tests\n");
+    fflush(stdout);
     RUN_TEST(test_static_serve_html);
     RUN_TEST(test_static_serve_index);
     RUN_TEST(test_static_not_found);

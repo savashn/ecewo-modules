@@ -14,6 +14,7 @@ The `ecewo-mock.h` file provides a lightweight HTTP mocking module for Ecewo app
     2. [`free_request()`](#free_request)
     3. [`mock_init()`](#mock_setup)
     4. [`mock_cleanup()`](#mock_cleanup)
+    5. [`mock_get_header()`](#mock-get-header)
 3. [Usage](#usage)
 
 > [!NOTE]
@@ -27,7 +28,8 @@ The `ecewo-mock.h` file provides a lightweight HTTP mocking module for Ecewo app
 HTTP methods supported by the mock framework:
 
 ```c
-typedef enum {
+typedef enum
+{
     GET,
     POST,
     PUT,
@@ -53,7 +55,8 @@ typedef struct {
 Parameters for creating a mock HTTP request:
 
 ```c
-typedef struct {
+typedef struct
+{
     MockMethod method;      // HTTP method
     const char *path;       // Request path (e.g., "/users/123")
     const char *body;       // Request body (optional, can be NULL)
@@ -67,7 +70,8 @@ typedef struct {
 Response returned by the mock module:
 
 ```c
-typedef struct {
+typedef struct
+{
     uint16_t status_code;   // HTTP status code (e.g., 200, 404)
     char *body;             // Response body
     size_t body_len;        // Length of response body
@@ -149,7 +153,15 @@ Clean up the mock testing environment:
 void mock_cleanup(void);
 ```
 
-## Usage
+### `mock_get_header()`
+
+Get header of a response that received from the mocking request
+
+```c
+const char *mock_get_header(MockResponse *res, const char *key);
+```
+
+## BasicUsage
 
 ```c
 #include "ecewo.h"
@@ -228,5 +240,37 @@ int main(void)
 
     mock_cleanup();
     return 0;
+}
+```
+
+## Getting Response Header
+
+```c
+void handler_with_response_headers(Req *req, Res *res)
+{
+    set_header(res, "X-Request-ID", "12345");
+    set_header(res, "X-Rate-Limit", "100");
+    set_header(res, "Cache-Control", "no-cache");
+    
+    send_text(res, 200, "OK");
+}
+
+int test_response_headers(void)
+{
+    MockParams params = {
+        .method = MOCK_GET,
+        .path = "/test"
+    };
+    
+    MockResponse res = request(&params);
+    
+    ASSERT_EQ(200, res.status_code);
+    
+    ASSERT_EQ_STR("12345", mock_get_header(&res, "X-Request-ID"));
+    ASSERT_EQ_STR("100", mock_get_header(&res, "X-Rate-Limit"));
+    ASSERT_EQ_STR("no-cache", mock_get_header(&res, "Cache-Control"));
+    
+    free_request(&res);
+    RETURN_OK();
 }
 ```

@@ -1,6 +1,10 @@
 #ifndef ECEWO_STATIC_H
 #define ECEWO_STATIC_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "ecewo.h"
 #include <stdbool.h>
 
@@ -20,5 +24,9 @@ void serve_static(const char *mount_path, // URL prefix (e.g., "/" or "/assets")
                   const Static *options); // Configuration options (NULL for defaults)
 
 void static_cleanup(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,12 @@
 # CONTRIBUTING
 
-All kinds of contributions are welcome. Please follow the general coding style.
+All kinds of contributions are welcome.
+
+Please follow the existing coding style. The project uses clang-format for code formatting. If you are not sure about the style of your code, you can format your changes by running:
+
+```shell
+clang-format -i <path-to-file>
+```
 
 ### Some missing modules
 
@@ -13,4 +19,4 @@ All kinds of contributions are welcome. Please follow the general coding style.
 
 When adding a new module, please write documentation and tests for it as well.
 
-Thank you for your contribution <3
+**Thank you for your contribution <3**

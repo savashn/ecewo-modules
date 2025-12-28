@@ -9,9 +9,9 @@
 // HANDLERS
 // ============================================================================
 
-static void on_read_complete(FSRequest *fs_req, const char *error)
+static void on_read_complete(const char *error, const char *data, size_t size, void *user_data)
 {
-    Res *res = (Res *)fs_req->context;
+    Res *res = (Res *)user_data;
     
     if (error)
     {
@@ -19,12 +19,13 @@ static void on_read_complete(FSRequest *fs_req, const char *error)
         return;
     }
     
-    reply(res, 200, "text/plain", fs_req->data, fs_req->size);
+    set_header(res, "Content-Type", "text/plain");
+    reply(res, 200, data, size);
 }
 
-static void on_write_complete(FSRequest *fs_req, const char *error)
+static void on_write_complete(const char *error, void *user_data)
 {
-    Res *res = (Res *)fs_req->context;
+    Res *res = (Res *)user_data;
     
     if (error)
     {
@@ -35,9 +36,9 @@ static void on_write_complete(FSRequest *fs_req, const char *error)
     send_text(res, 201, "File written");
 }
 
-static void on_stat_complete(FSRequest *fs_req, const char *error)
+static void on_stat_complete(const char *error, const uv_stat_t *stat, void *user_data)
 {
-    Res *res = (Res *)fs_req->context;
+    Res *res = (Res *)user_data;
     
     if (error)
     {
@@ -46,7 +47,7 @@ static void on_stat_complete(FSRequest *fs_req, const char *error)
     }
     
     char *response = arena_sprintf(res->arena, "size:%lld", 
-                                   (long long)fs_req->stat.st_size);
+                                   (long long)stat->st_size);
     send_text(res, 200, response);
 }
 
@@ -60,7 +61,7 @@ void handler_fs_read(Req *req, Res *res)
     }
     
     char *filepath = arena_sprintf(req->arena, "test_files/%s", filename);
-    fs_read_file(res, filepath, on_read_complete);
+    fs_read_file(filepath, on_read_complete, res);
 }
 
 void handler_fs_write(Req *req, Res *res)
@@ -73,7 +74,7 @@ void handler_fs_write(Req *req, Res *res)
     }
     
     char *filepath = arena_sprintf(req->arena, "test_files/%s", filename);
-    fs_write_file(res, filepath, req->body, req->body_len, on_write_complete);
+    fs_write_file(filepath, req->body, req->body_len, on_write_complete, res);
 }
 
 void handler_fs_stat(Req *req, Res *res)
@@ -86,7 +87,7 @@ void handler_fs_stat(Req *req, Res *res)
     }
     
     char *filepath = arena_sprintf(req->arena, "test_files/%s", filename);
-    fs_stat(res, filepath, on_stat_complete);
+    fs_stat(filepath, on_stat_complete, res);
 }
 
 // ============================================================================

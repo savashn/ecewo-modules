@@ -14,10 +14,7 @@ static struct
     bool enabled;
 } cors_state = {0};
 
-// =============================================================================
 // DEFAULTS
-// =============================================================================
-
 static const char *DEFAULT_ORIGIN = "*";
 static const char *DEFAULT_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 static const char *DEFAULT_HEADERS = "Content-Type";
@@ -38,10 +35,6 @@ static void cors_set_defaults(void)
         cors_state.max_age = DEFAULT_MAX_AGE;
 }
 
-// =============================================================================
-// HELPERS
-// =============================================================================
-
 static bool is_origin_allowed(const char *request_origin)
 {
     if (!request_origin || !cors_state.origin)
@@ -53,17 +46,10 @@ static bool is_origin_allowed(const char *request_origin)
     return strcmp(request_origin, cors_state.origin) == 0;
 }
 
-// =============================================================================
-// MIDDLEWARE
-// =============================================================================
-
-static int cors_middleware(Req *req, Res *res, Chain *chain)
+static void cors_middleware(Req *req, Res *res, Next next)
 {
     if (!cors_state.enabled)
-    {
-        printf("CORS disabled, skipping\n");
-        return next(req, res, chain);
-    }
+        next(req, res);
 
     const char *request_origin = get_header(req, "Origin");
 
@@ -72,7 +58,7 @@ static int cors_middleware(Req *req, Res *res, Chain *chain)
         if (request_origin && !is_origin_allowed(request_origin))
         {
             send_text(res, 403, "CORS: Origin not allowed");
-            return -1;
+            return;
         }
 
         if (strcmp(cors_state.origin, "*") == 0)
@@ -89,8 +75,9 @@ static int cors_middleware(Req *req, Res *res, Chain *chain)
         set_header(res, "Access-Control-Allow-Credentials", cors_state.credentials);
         set_header(res, "Access-Control-Max-Age", cors_state.max_age);
 
-        reply(res, 204, "text/plain", "", 0);
-        return -1;
+        set_header(res, "Content-Type", "text/plain");
+        reply(res, 204, "", 0);
+        return;
     }
 
     bool should_add = false;
@@ -113,12 +100,8 @@ static int cors_middleware(Req *req, Res *res, Chain *chain)
         set_header(res, "Access-Control-Allow-Credentials", cors_state.credentials);
     }
 
-    return next(req, res, chain);
+    next(req, res);
 }
-
-// =============================================================================
-// PUBLIC API
-// =============================================================================
 
 void cors_init(const Cors *config)
 {
@@ -126,7 +109,6 @@ void cors_init(const Cors *config)
 
     if (config)
     {
-        // Sadece pointer'ları kopyala
         cors_state.origin = config->origin;
         cors_state.methods = config->methods;
         cors_state.headers = config->headers;
@@ -143,6 +125,6 @@ void cors_init(const Cors *config)
     }
 
     cors_set_defaults();
-    hook(cors_middleware);
+    use(cors_middleware);
     cors_state.enabled = true;
 }

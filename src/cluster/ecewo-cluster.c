@@ -1,6 +1,7 @@
-#ifdef __linux__
 #define _GNU_SOURCE
-#include <sys/prctl.h>
+
+#ifndef __linux__
+    #error "Cluster mode supported on Linux only."
 #endif
 
 #include "uv.h"
@@ -13,22 +14,29 @@
 #include <time.h>
 #include <inttypes.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#else // _WIN32
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <fcntl.h>
 #include <errno.h>
-#endif // _WIN32
+
+#define WORKER_STOP_SIGNAL SIGTERM
 
 #define RESPAWN_THROTTLE_COUNT 3
 #define RESPAWN_THROTTLE_WINDOW 5 // seconds
 
-typedef struct {
+#ifdef ECEWO_DEBUG
+#define LOG_DEBUG(fmt, ...) \
+    fprintf(stderr, "[DEBUG] " fmt "\n", ##__VA_ARGS__)
+#else
+#define LOG_DEBUG(fmt, ...) ((void)0)
+#endif
+
+#define LOG_ERROR(fmt, ...) \
+    fprintf(stderr, "[ERROR] " fmt "\n", ##__VA_ARGS__)
+
+typedef struct
+{
     uv_process_t handle;
     uint8_t worker_id;
     uint16_t port;
@@ -42,7 +50,8 @@ typedef struct {
     int exit_status;
 } worker_process_t;
 
-static struct {
+static struct
+{
     bool is_master;
     uint8_t worker_id;
     uint8_t worker_count;
@@ -67,11 +76,6 @@ static struct {
 } cluster_state = {0};
 
 static void on_exit_cb(uv_process_t *handle, int64_t exit_status, int term_signal);
-static void on_sigterm(uv_signal_t *handle, int signum);
-static void on_sigint(uv_signal_t *handle, int signum);
-#ifndef _WIN32
-static void on_sigusr2(uv_signal_t *handle, int signum);
-#endif
 
 static void save_original_args(int argc, char **argv)
 {
@@ -83,7 +87,7 @@ static void save_original_args(int argc, char **argv)
     cluster_state.original_argv = calloc(argc + 1, sizeof(char *));
     if (!cluster_state.original_argv)
     {
-        fprintf(stderr, "ERROR: Failed to allocate memory for argv\n");
+        LOG_ERROR("Failed to allocate memory for argv");
         return;
     }
     
@@ -94,7 +98,7 @@ static void save_original_args(int argc, char **argv)
             cluster_state.original_argv[i] = strdup(argv[i]);
             if (!cluster_state.original_argv[i])
             {
-                fprintf(stderr, "ERROR: Failed to duplicate argv[%d]\n", i);
+                LOG_ERROR("Failed to duplicate argv[%d]", i);
                 for (int j = 0; j < i; j++)
                     free(cluster_state.original_argv[j]);
                 free(cluster_state.original_argv);
@@ -108,7 +112,7 @@ static void save_original_args(int argc, char **argv)
     size_t size = sizeof(cluster_state.exe_path);
     if (uv_exepath(cluster_state.exe_path, &size) != 0)
     {
-        fprintf(stderr, "Failed to get executable path\n");
+        LOG_DEBUG("Failed to get executable path");
         strncpy(cluster_state.exe_path, argv[0], sizeof(cluster_state.exe_path) - 1);
     }
 }
@@ -131,7 +135,7 @@ static char **build_worker_args(uint8_t worker_id, uint16_t port)
 {
     if (!cluster_state.original_argv || cluster_state.original_argc == 0)
     {
-        fprintf(stderr, "Original arguments not saved\n");
+        LOG_DEBUG("Original arguments not saved");
         return NULL;
     }
     
@@ -152,7 +156,7 @@ static char **build_worker_args(uint8_t worker_id, uint16_t port)
     char **args = calloc(total_argc + 1, sizeof(char *));
     if (!args)
     {
-        fprintf(stderr, "ERROR: Failed to allocate worker args\n");
+        LOG_ERROR("Failed to allocate worker args");
         return NULL;
     }
     
@@ -178,7 +182,7 @@ static char **build_worker_args(uint8_t worker_id, uint16_t port)
         free(worker_id_str);
         free(port_str);
         free(args);
-        fprintf(stderr, "ERROR: Failed to allocate worker arg strings\n");
+        LOG_ERROR("Failed to allocate worker arg strings");
         return NULL;
     }
     
@@ -236,15 +240,14 @@ static void apply_config(const Cluster *config)
 
     if (config)
     {
-        if (config->workers < 1)
+        if (config->cpus < 1)
         {
-            fprintf(stderr, "ERROR: Invalid worker count: %" PRIu8 " (must be >= 1)\n",
-                    config->workers);
+            LOG_ERROR("Invalid worker count: %" PRIu8 " must be >= 1)", config->cpus);
             cluster_state.worker_count = 1;
         }
         else
         {
-            cluster_state.worker_count = config->workers;
+            cluster_state.worker_count = config->cpus;
         }
 
         cluster_state.config.respawn = config->respawn;
@@ -252,10 +255,11 @@ static void apply_config(const Cluster *config)
         cluster_state.config.on_exit = config->on_exit;
     }
 
-    uint8_t cpu_count = cluster_cpu_count();
+    uint8_t cpu_count = cluster_cpus();
     if (cluster_state.worker_count > cpu_count * 2)
-        fprintf(stderr, "WARNING: %" PRIu8 " workers > 2x CPU count (%" PRIu8 ") - may cause contention\n",
-                cluster_state.worker_count, cpu_count);
+        LOG_DEBUG("WARNING: %" PRIu8 " workers > 2x CPU count (%" PRIu8 ") - may cause contention",
+                   cluster_state.worker_count,
+                   cpu_count);
 }
 
 static bool should_respawn_worker(worker_process_t *worker)
@@ -282,8 +286,8 @@ static bool should_respawn_worker(worker_process_t *worker)
         time_t window = now - worker->restart_times[0];
         if (window < RESPAWN_THROTTLE_WINDOW)
         {
-            fprintf(stderr, "ERROR: Worker %" PRIu8 " crashing too fast (%d times in %lds), disabling respawn\n",
-                    worker->worker_id, RESPAWN_THROTTLE_COUNT, (long)window);
+            LOG_ERROR("Worker %" PRIu8 " crashing too fast (%d times in %lds), disabling respawn",
+                      worker->worker_id, RESPAWN_THROTTLE_COUNT, (long)window);
 
             worker->respawn_disabled = true;
             return false;
@@ -297,13 +301,13 @@ static int spawn_worker(uint8_t worker_id, uint16_t port)
 {
     if (worker_id >= cluster_state.worker_count)
     {
-        fprintf(stderr, "ERROR: Invalid worker ID: %" PRIu8 "\n", worker_id);
+        LOG_ERROR("Invalid worker ID: %" PRIu8, worker_id);
         return -1;
     }
     
     if (!cluster_state.original_argv)
     {
-        fprintf(stderr, "ERROR: Original arguments not saved\n");
+        LOG_ERROR("Original arguments not saved");
         return -1;
     }
     
@@ -320,7 +324,7 @@ static int spawn_worker(uint8_t worker_id, uint16_t port)
     char **args = build_worker_args(worker_id, port);
     if (!args)
     {
-        fprintf(stderr, "Failed to build worker arguments\n");
+        LOG_ERROR("Failed to build worker arguments");
         return -1;
     }
     
@@ -331,12 +335,6 @@ static int spawn_worker(uint8_t worker_id, uint16_t port)
     
     setup_worker_stdio(&options);
     
-#ifdef _WIN32
-    SetEnvironmentVariable("ECEWO_WORKER", "1");
-    
-    options.env = NULL;
-    options.flags = UV_PROCESS_WINDOWS_HIDE;
-#else
     extern char **environ;
     
     int env_count = 0;
@@ -353,22 +351,17 @@ static int spawn_worker(uint8_t worker_id, uint16_t port)
     
     options.env = new_env;
     options.flags = UV_PROCESS_DETACHED;
-#endif
     
     uv_process_t *handle = &worker->handle;
     handle->data = worker;
     
     int result = uv_spawn(uv_default_loop(), handle, &options);
     
-#ifdef _WIN32
-    SetEnvironmentVariable("ECEWO_WORKER", NULL);
-#endif
-    
     free_worker_args(args);
     
     if (result != 0)
     {
-        fprintf(stderr, "Failed to spawn worker %" PRIu8 ": %s\n", worker_id, uv_strerror(result));
+        LOG_ERROR("Failed to spawn worker %" PRIu8 ": %s", worker_id, uv_strerror(result));
         return -1;
     }
     
@@ -393,35 +386,64 @@ static void on_exit_cb(uv_process_t *handle, int64_t exit_status, int term_signa
     worker->active = false;
     worker->exit_status = (int)exit_status;
     
-    bool is_crash = !cluster_state.shutdown_requested && exit_status != 0;
+    bool is_crash = !cluster_state.shutdown_requested && 
+                    !cluster_state.graceful_restart_requested && 
+                    exit_status != 0;
     
-#ifndef _WIN32
     if (term_signal == SIGTERM || term_signal == SIGINT)
         is_crash = false;
-#endif
     
     if (is_crash)
     {
-        fprintf(stderr, "Worker %" PRIu8 " crashed after %ld seconds (exit: %d",
-                worker_id, (long)uptime, (int)exit_status);
-        
-#ifndef _WIN32
-        fprintf(stderr, ", signal: %d", term_signal);
-#endif
-        
-        fprintf(stderr, ")\n");
+        LOG_ERROR("Worker %" PRIu8 " crashed after %ld seconds (exit: %d)",
+                  worker_id, (long)uptime, (int)exit_status);
     }
     
     if (cluster_state.config.on_exit)
         cluster_state.config.on_exit(worker_id, (int)exit_status);
     
-    if (is_crash && should_respawn_worker(worker))
+    uv_close((uv_handle_t *)handle, NULL);
+    
+    // Respawn logic
+    bool should_respawn = false;
+    
+    if (cluster_state.graceful_restart_requested)
     {
-        if (spawn_worker(worker_id, worker->port) != 0)
-            fprintf(stderr, "Failed to respawn worker %" PRIu8 "\n", worker_id);
+        should_respawn = true;
+    }
+    else if (is_crash && should_respawn_worker(worker))
+    {
+        should_respawn = true;
     }
     
-    uv_close((uv_handle_t *)handle, NULL);
+    if (should_respawn)
+    {
+        uv_sleep(100);
+        
+        if (spawn_worker(worker_id, worker->port) != 0)
+        {
+            LOG_ERROR("Failed to respawn worker %" PRIu8, worker_id);
+        }
+    }
+    
+    if (cluster_state.graceful_restart_requested)
+    {
+        bool all_active = true;
+        for (uint8_t i = 0; i < cluster_state.worker_count; i++)
+        {
+            if (!cluster_state.workers[i].active)
+            {
+                all_active = false;
+                break;
+            }
+        }
+        
+        if (all_active)
+        {
+            cluster_state.graceful_restart_requested = false;
+            LOG_DEBUG("Graceful restart completed\n");
+        }
+    }
 }
 
 static void on_sigterm(uv_signal_t *handle, int signum)
@@ -435,14 +457,13 @@ static void on_sigterm(uv_signal_t *handle, int signum)
     if (cluster_state.shutdown_requested)
         return;
     
+    LOG_DEBUG("Shutdown requested (SIGTERM)");
     cluster_state.shutdown_requested = true;
     
     for (uint8_t i = 0; i < cluster_state.worker_count; i++)
     {
         if (cluster_state.workers[i].active)
-        {
-            uv_process_kill(&cluster_state.workers[i].handle, SIGTERM);
-        }
+            uv_process_kill(&cluster_state.workers[i].handle, WORKER_STOP_SIGNAL);
     }
 }
 
@@ -457,24 +478,25 @@ static void on_sigint(uv_signal_t *handle, int signum)
     if (cluster_state.shutdown_requested)
         return;
     
+    LOG_DEBUG("\nShutdown requested (SIGINT)...");
     cluster_state.shutdown_requested = true;
     
     for (uint8_t i = 0; i < cluster_state.worker_count; i++)
     {
         if (cluster_state.workers[i].active)
-        {
-            uv_process_kill(&cluster_state.workers[i].handle, SIGTERM);
-        }
+            uv_process_kill(&cluster_state.workers[i].handle, WORKER_STOP_SIGNAL);
     }
 }
 
-#ifndef _WIN32
 static void on_sigusr2(uv_signal_t *handle, int signum)
 {
     (void)handle;
     (void)signum;
     
     if (!cluster_state.is_master)
+        return;
+    
+    if (cluster_state.graceful_restart_requested || cluster_state.shutdown_requested)
         return;
     
     cluster_state.graceful_restart_requested = true;
@@ -484,10 +506,7 @@ static void on_sigusr2(uv_signal_t *handle, int signum)
         if (cluster_state.workers[i].active)
             uv_process_kill(&cluster_state.workers[i].handle, SIGTERM);
     }
-    
-    cluster_state.graceful_restart_requested = false;
 }
-#endif
 
 static void setup_signal_handlers(void)
 {
@@ -500,10 +519,8 @@ static void setup_signal_handlers(void)
     uv_signal_init(uv_default_loop(), &cluster_state.sigint);
     uv_signal_start(&cluster_state.sigint, on_sigint, SIGINT);
     
-#ifndef _WIN32
     uv_signal_init(uv_default_loop(), &cluster_state.sigusr2);
     uv_signal_start(&cluster_state.sigusr2, on_sigusr2, SIGUSR2);
-#endif
 }
 
 static void cleanup_signal_handlers(void)
@@ -520,13 +537,11 @@ static void cleanup_signal_handlers(void)
         uv_close((uv_handle_t *)&cluster_state.sigint, NULL);
     }
     
-#ifndef _WIN32
     if (!uv_is_closing((uv_handle_t *)&cluster_state.sigusr2))
     {
         uv_signal_stop(&cluster_state.sigusr2);
         uv_close((uv_handle_t *)&cluster_state.sigusr2, NULL);
     }
-#endif
 }
 
 static void close_handle_cb(uv_handle_t *handle, void *arg)
@@ -590,13 +605,13 @@ bool cluster_init(const Cluster *config, int argc, char **argv)
 {
     if (cluster_state.initialized)
     {
-        fprintf(stderr, "Cluster already initialized\n");
+        LOG_ERROR("Cluster already initialized");
         return false;
     }
     
-    if (!config || config->workers == 0 || config->port == 0 || !argv)
+    if (!config || config->cpus == 0 || config->port == 0 || !argv)
     {
-        fprintf(stderr, "Invalid cluster configuration\n");
+        LOG_ERROR("Invalid cluster configuration");
         return false;
     }
     
@@ -643,7 +658,7 @@ bool cluster_init(const Cluster *config, int argc, char **argv)
     cluster_state.workers = calloc(cluster_state.worker_count, sizeof(worker_process_t));
     if (!cluster_state.workers)
     {
-        fprintf(stderr, "Failed to allocate worker array\n");
+        LOG_ERROR("Failed to allocate worker array");
         cleanup_original_args();
         return false;
     }
@@ -651,22 +666,16 @@ bool cluster_init(const Cluster *config, int argc, char **argv)
     int failed_count = 0;
     for (uint8_t i = 0; i < cluster_state.worker_count; i++)
     {
-        uint16_t port;
-        
-#ifdef _WIN32
-        port = cluster_state.base_port + i;
-#else
-        port = cluster_state.base_port;
-#endif
+        uint16_t port = cluster_state.base_port;
         
         if (spawn_worker(i, port) != 0)
         {
-            fprintf(stderr, "Failed to spawn worker %" PRIu8 "\n", i);
+            LOG_ERROR("Failed to spawn worker %" PRIu8, i);
             failed_count++;
             
             if (failed_count > cluster_state.worker_count / 2)
             {
-                fprintf(stderr, "Too many spawn failures, aborting\n");
+                LOG_ERROR("Too many spawn failures, aborting");
                 cleanup_original_args();
                 return false;
             }
@@ -716,24 +725,148 @@ uint8_t cluster_worker_count(void)
     return cluster_state.worker_count;
 }
 
-uint8_t cluster_cpu_count(void)
+static long count_physical_cores(void)
 {
-#ifdef _WIN32
-    SYSTEM_INFO sysinfo;
-    GetSystemInfo(&sysinfo);
-    return (uint8_t)sysinfo.dwNumberOfProcessors;
-#else
-    long count = sysconf(_SC_NPROCESSORS_ONLN);
-    if (count > 255) count = 255;
-    return count > 0 ? (uint8_t)count : 1;
-#endif
+    int max_cpu = sysconf(_SC_NPROCESSORS_ONLN);
+    if (max_cpu <= 0 || max_cpu > 1024)
+        return -1;
+    
+    bool core_seen[1024] = {0};
+    int unique_cores = 0;
+    
+    for (int cpu = 0; cpu < max_cpu; cpu++)
+    {
+        char path[256];
+        snprintf(path, sizeof(path), 
+                "/sys/devices/system/cpu/cpu%d/topology/core_id", cpu);
+        
+        uv_fs_t open_req;
+        int fd = uv_fs_open(NULL, &open_req, path, O_RDONLY, 0, NULL);
+        uv_fs_req_cleanup(&open_req);
+        
+        if (fd >= 0)
+        {
+            char buf[32];
+            uv_buf_t uv_buf = uv_buf_init(buf, sizeof(buf) - 1);
+            
+            uv_fs_t read_req;
+            int nread = uv_fs_read(NULL, &read_req, fd, &uv_buf, 1, 0, NULL);
+            uv_fs_req_cleanup(&read_req);
+            
+            if (nread > 0)
+            {
+                buf[nread] = '\0';
+                int core_id = atoi(buf);
+                
+                if (core_id >= 0 && core_id < 1024 && !core_seen[core_id])
+                {
+                    core_seen[core_id] = true;
+                    unique_cores++;
+                }
+            }
+            
+            uv_fs_t close_req;
+            uv_fs_close(NULL, &close_req, fd, NULL);
+            uv_fs_req_cleanup(&close_req);
+        }
+    }
+    
+    return unique_cores > 0 ? unique_cores : -1;
+}
+
+uint8_t cluster_cpus_physical(void)
+{
+    long logical_cores = sysconf(_SC_NPROCESSORS_ONLN);
+    if (logical_cores > 255) logical_cores = 255;
+    if (logical_cores < 1) return 1;
+    
+    long physical_cores = count_physical_cores();
+    
+    if (physical_cores > 0)
+    {
+        return (uint8_t)physical_cores;
+    }
+    
+    physical_cores = logical_cores;
+    
+    uv_fs_t open_req;
+    int fd = uv_fs_open(NULL, &open_req, 
+                        "/sys/devices/system/cpu/cpu0/topology/thread_siblings_list",
+                        O_RDONLY, 0, NULL);
+    uv_fs_req_cleanup(&open_req);
+    
+    if (fd >= 0)
+    {
+        char line[256];
+        uv_buf_t buf = uv_buf_init(line, sizeof(line) - 1);
+        
+        uv_fs_t read_req;
+        int nread = uv_fs_read(NULL, &read_req, fd, &buf, 1, 0, NULL);
+        uv_fs_req_cleanup(&read_req);
+        
+        if (nread > 0)
+        {
+            line[nread] = '\0';
+            
+            if (nread > 0 && line[nread - 1] == '\n')
+                line[nread - 1] = '\0';
+            
+            int sibling_count = 1;
+            bool has_comma = false;
+            bool has_dash = false;
+            
+            for (char *p = line; *p; p++)
+            {
+                if (*p == ',')
+                {
+                    sibling_count++;
+                    has_comma = true;
+                }
+                else if (*p == '-')
+                {
+                    has_dash = true;
+                }
+            }
+            
+            if (has_dash && !has_comma)
+            {
+                int start = -1, end = -1;
+                if (sscanf(line, "%d-%d", &start, &end) == 2)
+                {
+                    sibling_count = end - start + 1;
+                }
+            }
+            
+            if (sibling_count > 1)
+            {
+                physical_cores = logical_cores / sibling_count;
+            }
+        }
+        
+        uv_fs_t close_req;
+        uv_fs_close(NULL, &close_req, fd, NULL);
+        uv_fs_req_cleanup(&close_req);
+    }
+    
+    if (physical_cores < 1) physical_cores = 1;
+    return (uint8_t)physical_cores;
+}
+
+uint8_t cluster_cpus(void)
+{
+    unsigned int parallelism = uv_available_parallelism();
+    
+    if (parallelism > 255)
+        return 255;
+    
+    return (uint8_t)parallelism;
 }
 
 void cluster_signal_workers(int signal)
 {
     if (!cluster_state.is_master || !cluster_state.initialized)
     {
-        fprintf(stderr, "Only master can signal workers\n");
+        LOG_ERROR("Only master can signal workers");
         return;
     }
     
@@ -748,11 +881,12 @@ void cluster_wait_workers(void)
 {
     if (!cluster_state.is_master || !cluster_state.initialized)
     {
-        fprintf(stderr, "Only master can wait for workers\n");
+        LOG_ERROR("Only master can wait for workers");
         return;
     }
     
     uv_loop_t *loop = uv_default_loop();
+    uint64_t shutdown_start_time = 0;
     
     while (1)
     {
@@ -771,11 +905,15 @@ void cluster_wait_workers(void)
         
         if (cluster_state.shutdown_requested)
         {
-            static int shutdown_wait_count = 0;
-            shutdown_wait_count++;
+            if (shutdown_start_time == 0)
+                shutdown_start_time = uv_now(loop);
             
-            if (shutdown_wait_count > 300)
+            uint64_t elapsed = uv_now(loop) - shutdown_start_time;
+            
+            // Forcekill after 30 seconds
+            if (elapsed > 30000)
             {
+                LOG_DEBUG("Force killing remaining workers...");
                 for (uint8_t i = 0; i < cluster_state.worker_count; i++)
                 {
                     if (cluster_state.workers[i].active)

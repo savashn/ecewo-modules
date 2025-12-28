@@ -1,50 +1,75 @@
 #include "ecewo-fs.h"
+#include "ecewo.h"  // Only for get_loop()
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-
-// ========================================================================
-// INTERNAL HELPERS
-// ========================================================================
-
-static char *make_error_msg(void *context, int errcode)
-{
-    Req *req = (Req *)context;
-    return arena_sprintf(req->arena, "%s: %s",
-                         uv_err_name(errcode),
-                         uv_strerror(errcode));
-}
-
-// ========================================================================
-// READ FILE IMPLEMENTATION
-// ========================================================================
 
 typedef struct
 {
-    FSRequest *fs_req;
+    uv_fs_t fs_req;
+    void *user_data;
+    
+    // Callbacks
+    fs_read_callback_t read_callback;
+    fs_write_callback_t write_callback;
+    fs_stat_callback_t stat_callback;
+    
+    // Data
+    char *data;
+    size_t size;
+    uv_stat_t stat;
+    
+    // Internal
     uv_file file;
     size_t file_size;
-} read_ctx_t;
+    char *path;
+} fs_request_t;
+
+static char *make_error_msg(int errcode)
+{
+    static char buf[256];
+    snprintf(buf, sizeof(buf), "%s: %s", uv_err_name(errcode), uv_strerror(errcode));
+    return buf;
+}
+
+static void fs_request_cleanup(fs_request_t *req, bool free_data)
+{
+    if (!req)
+        return;
+    
+    if (req->path)
+        free(req->path);
+    
+    if (free_data && req->data)
+        free(req->data);
+    
+    free(req);
+}
 
 static void read_close_cb(uv_fs_t *req)
 {
-    read_ctx_t *ctx = (read_ctx_t *)req->data;
-    FSRequest *fs_req = ctx->fs_req;
-
+    fs_request_t *fs_req = (fs_request_t *)req->data;
+    
     uv_fs_req_cleanup(req);
-    fs_req->callback(fs_req, NULL);
+    
+    fs_req->read_callback(NULL, fs_req->data, fs_req->size, fs_req->user_data);
+    
+    // Cleanup but don't free data, user owns it now
+    fs_request_cleanup(fs_req, false);
 }
 
 static void read_data_cb(uv_fs_t *req)
 {
-    read_ctx_t *ctx = (read_ctx_t *)req->data;
-    FSRequest *fs_req = ctx->fs_req;
+    fs_request_t *fs_req = (fs_request_t *)req->data;
 
     if (req->result < 0)
     {
-        char *error = make_error_msg(fs_req->context, (int)req->result);
+        char *error = make_error_msg((int)req->result);
         uv_fs_req_cleanup(req);
-        uv_fs_close(get_loop(), &fs_req->fs_req, ctx->file, NULL);
-        fs_req->callback(fs_req, error);
+        uv_fs_close(get_loop(), &fs_req->fs_req, fs_req->file, NULL);
+        
+        fs_req->read_callback(error, NULL, 0, fs_req->user_data);
+        fs_request_cleanup(fs_req, true);
         return;
     }
 
@@ -52,455 +77,382 @@ static void read_data_cb(uv_fs_t *req)
     fs_req->data[fs_req->size] = '\0';
 
     uv_fs_req_cleanup(req);
-
-    fs_req->fs_req.data = ctx;
-    uv_fs_close(get_loop(), &fs_req->fs_req, ctx->file, read_close_cb);
+    uv_fs_close(get_loop(), &fs_req->fs_req, fs_req->file, read_close_cb);
 }
 
 static void read_open_cb(uv_fs_t *req)
 {
-    read_ctx_t *ctx = (read_ctx_t *)req->data;
-    FSRequest *fs_req = ctx->fs_req;
-    Req *request = (Req *)fs_req->context;
+    fs_request_t *fs_req = (fs_request_t *)req->data;
 
     if (req->result < 0)
     {
-        char *error = make_error_msg(fs_req->context, (int)req->result);
+        char *error = make_error_msg((int)req->result);
         uv_fs_req_cleanup(req);
-        fs_req->callback(fs_req, error);
+        
+        fs_req->read_callback(error, NULL, 0, fs_req->user_data);
+        fs_request_cleanup(fs_req, false);
         return;
     }
 
-    ctx->file = (uv_file)req->result;
+    fs_req->file = (uv_file)req->result;
     uv_fs_req_cleanup(req);
 
-    fs_req->data = arena_alloc(request->arena, ctx->file_size + 1);
+    fs_req->data = malloc(fs_req->file_size + 1);
     if (!fs_req->data)
     {
-        uv_fs_close(get_loop(), &fs_req->fs_req, ctx->file, NULL);
-        fs_req->callback(fs_req, "Memory allocation failed");
+        uv_fs_close(get_loop(), &fs_req->fs_req, fs_req->file, NULL);
+        
+        fs_req->read_callback("Memory allocation failed", NULL, 0, fs_req->user_data);
+        fs_request_cleanup(fs_req, false);
         return;
     }
 
-    uv_buf_t buf = uv_buf_init(fs_req->data, (unsigned int)ctx->file_size);
-    fs_req->fs_req.data = ctx;
-    uv_fs_read(get_loop(), &fs_req->fs_req, ctx->file, &buf, 1, 0, read_data_cb);
+    uv_buf_t buf = uv_buf_init(fs_req->data, (unsigned int)fs_req->file_size);
+    uv_fs_read(get_loop(), &fs_req->fs_req, fs_req->file, &buf, 1, 0, read_data_cb);
 }
 
 static void read_stat_cb(uv_fs_t *req)
 {
-    read_ctx_t *ctx = (read_ctx_t *)req->data;
-    FSRequest *fs_req = ctx->fs_req;
+    fs_request_t *fs_req = (fs_request_t *)req->data;
 
     if (req->result < 0)
     {
-        char *error = make_error_msg(fs_req->context, (int)req->result);
+        char *error = make_error_msg((int)req->result);
         uv_fs_req_cleanup(req);
-        fs_req->callback(fs_req, error);
+        
+        fs_req->read_callback(error, NULL, 0, fs_req->user_data);
+        fs_request_cleanup(fs_req, false);
         return;
     }
 
-    ctx->file_size = (size_t)req->statbuf.st_size;
+    fs_req->file_size = (size_t)req->statbuf.st_size;
     uv_fs_req_cleanup(req);
 
-    fs_req->fs_req.data = ctx;
-    uv_fs_open(get_loop(), &fs_req->fs_req, (const char *)fs_req->data,
+    uv_fs_open(get_loop(), &fs_req->fs_req, fs_req->path,
                UV_FS_O_RDONLY, 0, read_open_cb);
 }
 
-void fs_read_file(void *context, const char *path, fs_callback_t callback)
+void fs_read_file(const char *path, fs_read_callback_t callback, void *user_data)
 {
-    FSRequest *fs_req;
-    read_ctx_t *ctx;
-    const char *path_copy;
-    int result;
-
-    if (!context || !path || !callback)
+    if (!path || !callback)
     {
         fprintf(stderr, "fs_read_file: Invalid arguments\n");
         return;
     }
 
-    Req *req = (Req *)context;
-
-    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
+    fs_request_t *fs_req = calloc(1, sizeof(fs_request_t));
     if (!fs_req)
     {
         fprintf(stderr, "fs_read_file: Memory allocation failed\n");
         return;
     }
 
-    memset(fs_req, 0, sizeof(FSRequest));
-    fs_req->context = context;
-    fs_req->callback = callback;
+    fs_req->user_data = user_data;
+    fs_req->read_callback = callback;
+    fs_req->path = strdup(path);
+    fs_req->fs_req.data = fs_req;
 
-    ctx = arena_alloc(req->arena, sizeof(read_ctx_t));
-    if (!ctx)
+    if (!fs_req->path)
     {
-        callback(fs_req, "Memory allocation failed");
+        free(fs_req);
         return;
     }
 
-    memset(ctx, 0, sizeof(read_ctx_t));
-    ctx->fs_req = fs_req;
-
-    path_copy = arena_strdup(req->arena, path);
-    fs_req->data = (char *)path_copy;
-
-    fs_req->fs_req.data = ctx;
-    result = uv_fs_stat(get_loop(), &fs_req->fs_req, path_copy, read_stat_cb);
-
+    int result = uv_fs_stat(get_loop(), &fs_req->fs_req, fs_req->path, read_stat_cb);
     if (result < 0)
     {
-        char *error = make_error_msg(context, result);
-        callback(fs_req, error);
+        char *error = make_error_msg(result);
+        callback(error, NULL, 0, user_data);
+        free(fs_req->path);
+        free(fs_req);
     }
 }
 
-// ========================================================================
-// WRITE FILE IMPLEMENTATION
-// ========================================================================
-
-typedef struct
-{
-    FSRequest *fs_req;
-    uv_file file;
-    uv_buf_t buf;
-} write_ctx_t;
-
 static void write_close_cb(uv_fs_t *req)
 {
-    write_ctx_t *ctx = (write_ctx_t *)req->data;
-    FSRequest *fs_req = ctx->fs_req;
-
+    fs_request_t *fs_req = (fs_request_t *)req->data;
     uv_fs_req_cleanup(req);
-    fs_req->callback(fs_req, NULL);
+    
+    fs_req->write_callback(NULL, fs_req->user_data);
+    fs_request_cleanup(fs_req, true);
 }
 
 static void write_data_cb(uv_fs_t *req)
 {
-    write_ctx_t *ctx = (write_ctx_t *)req->data;
-    FSRequest *fs_req = ctx->fs_req;
+    fs_request_t *fs_req = (fs_request_t *)req->data;
 
     if (req->result < 0)
     {
-        char *error = make_error_msg(fs_req->context, (int)req->result);
+        char *error = make_error_msg((int)req->result);
         uv_fs_req_cleanup(req);
-        uv_fs_close(get_loop(), &fs_req->fs_req, ctx->file, NULL);
-        fs_req->callback(fs_req, error);
+        uv_fs_close(get_loop(), &fs_req->fs_req, fs_req->file, NULL);
+        
+        fs_req->write_callback(error, fs_req->user_data);
+        fs_request_cleanup(fs_req, true);
         return;
     }
 
     fs_req->size = (size_t)req->result;
     uv_fs_req_cleanup(req);
-
-    fs_req->fs_req.data = ctx;
-    uv_fs_close(get_loop(), &fs_req->fs_req, ctx->file, write_close_cb);
+    uv_fs_close(get_loop(), &fs_req->fs_req, fs_req->file, write_close_cb);
 }
 
 static void write_open_cb(uv_fs_t *req)
 {
-    write_ctx_t *ctx = (write_ctx_t *)req->data;
-    FSRequest *fs_req = ctx->fs_req;
+    fs_request_t *fs_req = (fs_request_t *)req->data;
 
     if (req->result < 0)
     {
-        char *error = make_error_msg(fs_req->context, (int)req->result);
+        char *error = make_error_msg((int)req->result);
         uv_fs_req_cleanup(req);
-        fs_req->callback(fs_req, error);
+        
+        fs_req->write_callback(error, fs_req->user_data);
+        fs_request_cleanup(fs_req, true);
         return;
     }
 
-    ctx->file = (uv_file)req->result;
+    fs_req->file = (uv_file)req->result;
     uv_fs_req_cleanup(req);
 
-    fs_req->fs_req.data = ctx;
-    uv_fs_write(get_loop(), &fs_req->fs_req, ctx->file, &ctx->buf, 1, 0, write_data_cb);
+    uv_buf_t buf = uv_buf_init(fs_req->data, (unsigned int)fs_req->size);
+    uv_fs_write(get_loop(), &fs_req->fs_req, fs_req->file, &buf, 1, 0, write_data_cb);
 }
 
-void fs_write_file(void *context, const char *path,
-                   const void *data, size_t size, fs_callback_t callback)
+static void fs_write_internal(const char *path, const void *data, size_t size,
+                              fs_write_callback_t callback, void *user_data, int flags)
 {
-    FSRequest *fs_req;
-    write_ctx_t *ctx;
-    void *data_copy;
-    const char *path_copy;
-    int result;
-
-    if (!context || !path || !data || !callback)
+    if (!path || !data || !callback)
     {
-        fprintf(stderr, "fs_write_file: Invalid arguments\n");
+        fprintf(stderr, "fs_write: Invalid arguments\n");
         return;
     }
 
-    Req *req = (Req *)context;
-
-    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
+    fs_request_t *fs_req = calloc(1, sizeof(fs_request_t));
     if (!fs_req)
+        return;
+
+    fs_req->user_data = user_data;
+    fs_req->write_callback = callback;
+    fs_req->path = strdup(path);
+    fs_req->data = malloc(size);
+    fs_req->size = size;
+    fs_req->fs_req.data = fs_req;
+
+    if (!fs_req->path || !fs_req->data)
     {
-        fprintf(stderr, "fs_write_file: Memory allocation failed\n");
+        fs_request_cleanup(fs_req, true);
         return;
     }
 
-    memset(fs_req, 0, sizeof(FSRequest));
-    fs_req->context = context;
-    fs_req->callback = callback;
+    memcpy(fs_req->data, data, size);
 
-    ctx = arena_alloc(req->arena, sizeof(write_ctx_t));
-    if (!ctx)
-    {
-        callback(fs_req, "Memory allocation failed");
-        return;
-    }
-
-    memset(ctx, 0, sizeof(write_ctx_t));
-    ctx->fs_req = fs_req;
-
-    data_copy = arena_memdup(req->arena, (void *)data, size);
-    if (!data_copy)
-    {
-        callback(fs_req, "Memory allocation failed");
-        return;
-    }
-
-    ctx->buf = uv_buf_init(data_copy, (unsigned int)size);
-    path_copy = arena_strdup(req->arena, path);
-
-    fs_req->fs_req.data = ctx;
-    result = uv_fs_open(get_loop(), &fs_req->fs_req, path_copy,
-                        UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_TRUNC,
-                        0644, write_open_cb);
+    int result = uv_fs_open(get_loop(), &fs_req->fs_req, fs_req->path,
+                            flags, 0644, write_open_cb);
 
     if (result < 0)
     {
-        char *error = make_error_msg(context, result);
-        callback(fs_req, error);
+        char *error = make_error_msg(result);
+        callback(error, user_data);
+        fs_request_cleanup(fs_req, true);
     }
 }
 
-void fs_append_file(void *context, const char *path,
-                    const void *data, size_t size, fs_callback_t callback)
+void fs_write_file(const char *path, const void *data, size_t size,
+                   fs_write_callback_t callback, void *user_data)
 {
-    FSRequest *fs_req;
-    write_ctx_t *ctx;
-    void *data_copy;
-    const char *path_copy;
-    int result;
-
-    if (!context || !path || !data || !callback)
-    {
-        fprintf(stderr, "fs_append_file: Invalid arguments\n");
-        return;
-    }
-
-    Req *req = (Req *)context;
-
-    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
-    ctx = arena_alloc(req->arena, sizeof(write_ctx_t));
-
-    if (!fs_req || !ctx)
-    {
-        if (fs_req)
-            callback(fs_req, "Memory allocation failed");
-        return;
-    }
-
-    memset(fs_req, 0, sizeof(FSRequest));
-    memset(ctx, 0, sizeof(write_ctx_t));
-
-    fs_req->context = context;
-    fs_req->callback = callback;
-    ctx->fs_req = fs_req;
-
-    data_copy = arena_memdup(req->arena, (void *)data, size);
-    if (!data_copy)
-    {
-        callback(fs_req, "Memory allocation failed");
-        return;
-    }
-
-    ctx->buf = uv_buf_init(data_copy, (unsigned int)size);
-    path_copy = arena_strdup(req->arena, path);
-
-    fs_req->fs_req.data = ctx;
-    result = uv_fs_open(get_loop(), &fs_req->fs_req, path_copy,
-                        UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_APPEND,
-                        0644, write_open_cb);
-
-    if (result < 0)
-    {
-        char *error = make_error_msg(context, result);
-        callback(fs_req, error);
-    }
+    fs_write_internal(path, data, size, callback, user_data,
+                      UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_TRUNC);
 }
 
-// ========================================================================
-// SIMPLE OPERATIONS
-// ========================================================================
+void fs_append_file(const char *path, const void *data, size_t size,
+                    fs_write_callback_t callback, void *user_data)
+{
+    fs_write_internal(path, data, size, callback, user_data,
+                      UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_APPEND);
+}
+
+static void stat_cb(uv_fs_t *req)
+{
+    fs_request_t *fs_req = (fs_request_t *)req->data;
+    
+    if (req->result < 0)
+    {
+        char *error = make_error_msg((int)req->result);
+        uv_fs_req_cleanup(req);
+        
+        fs_req->stat_callback(error, NULL, fs_req->user_data);
+        fs_request_cleanup(fs_req, false);
+        return;
+    }
+    
+    fs_req->stat = req->statbuf;
+    uv_fs_req_cleanup(req);
+    
+    // Success
+    fs_req->stat_callback(NULL, &fs_req->stat, fs_req->user_data);
+    fs_request_cleanup(fs_req, false);
+}
+
+void fs_stat(const char *path, fs_stat_callback_t callback, void *user_data)
+{
+    if (!path || !callback)
+        return;
+
+    fs_request_t *fs_req = calloc(1, sizeof(fs_request_t));
+    if (!fs_req)
+        return;
+
+    fs_req->user_data = user_data;
+    fs_req->stat_callback = callback;
+    fs_req->path = strdup(path);
+    fs_req->fs_req.data = fs_req;
+
+    if (!fs_req->path)
+    {
+        free(fs_req);
+        return;
+    }
+
+    int result = uv_fs_stat(get_loop(), &fs_req->fs_req, fs_req->path, stat_cb);
+    if (result < 0)
+    {
+        char *error = make_error_msg(result);
+        callback(error, NULL, user_data);
+        free(fs_req->path);
+        free(fs_req);
+    }
+}
 
 static void simple_op_cb(uv_fs_t *req)
 {
-    FSRequest *fs_req = (FSRequest *)req->data;
+    fs_request_t *fs_req = (fs_request_t *)req->data;
+    
     char *error = NULL;
-
     if (req->result < 0)
-    {
-        error = make_error_msg(fs_req->context, (int)req->result);
-    }
-    else if (req->fs_type == UV_FS_STAT)
-    {
-        fs_req->stat = req->statbuf;
-    }
-
+        error = make_error_msg((int)req->result);
+    
     uv_fs_req_cleanup(req);
-    fs_req->callback(fs_req, error);
+    
+    fs_req->write_callback(error, fs_req->user_data);
+    fs_request_cleanup(fs_req, false);
 }
 
-void fs_stat(void *context, const char *path, fs_callback_t callback)
-{
-    FSRequest *fs_req;
-    const char *path_copy;
-    int result;
+typedef int (*uv_fs_op_t)(uv_loop_t*, uv_fs_t*, const char*, uv_fs_cb);
+typedef int (*uv_fs_op_mode_t)(uv_loop_t*, uv_fs_t*, const char*, int, uv_fs_cb);
 
-    if (!context || !path || !callback)
+static void fs_simple_op(const char *path, fs_write_callback_t callback,
+                         void *user_data, uv_fs_op_t op_fn)
+{
+    if (!path || !callback)
         return;
 
-    Req *req = (Req *)context;
-    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
+    fs_request_t *fs_req = calloc(1, sizeof(fs_request_t));
     if (!fs_req)
         return;
 
-    memset(fs_req, 0, sizeof(FSRequest));
-    fs_req->context = context;
-    fs_req->callback = callback;
+    fs_req->user_data = user_data;
+    fs_req->write_callback = callback;
+    fs_req->path = strdup(path);
     fs_req->fs_req.data = fs_req;
 
-    path_copy = arena_strdup(req->arena, path);
-    result = uv_fs_stat(get_loop(), &fs_req->fs_req, path_copy, simple_op_cb);
+    if (!fs_req->path)
+    {
+        free(fs_req);
+        return;
+    }
 
+    int result = op_fn(get_loop(), &fs_req->fs_req, fs_req->path, simple_op_cb);
     if (result < 0)
     {
-        char *error = make_error_msg(context, result);
-        callback(fs_req, error);
+        char *error = make_error_msg(result);
+        callback(error, user_data);
+        free(fs_req->path);
+        free(fs_req);
     }
 }
 
-void fs_unlink(void *context, const char *path, fs_callback_t callback)
+static void fs_simple_op_mode(const char *path, fs_write_callback_t callback,
+                               void *user_data, int mode, uv_fs_op_mode_t op_fn)
 {
-    FSRequest *fs_req;
-    const char *path_copy;
-    int result;
-
-    if (!context || !path || !callback)
+    if (!path || !callback)
         return;
 
-    Req *req = (Req *)context;
-    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
+    fs_request_t *fs_req = calloc(1, sizeof(fs_request_t));
     if (!fs_req)
         return;
 
-    memset(fs_req, 0, sizeof(FSRequest));
-    fs_req->context = context;
-    fs_req->callback = callback;
+    fs_req->user_data = user_data;
+    fs_req->write_callback = callback;
+    fs_req->path = strdup(path);
     fs_req->fs_req.data = fs_req;
 
-    path_copy = arena_strdup(req->arena, path);
-    result = uv_fs_unlink(get_loop(), &fs_req->fs_req, path_copy, simple_op_cb);
+    if (!fs_req->path)
+    {
+        free(fs_req);
+        return;
+    }
 
+    int result = op_fn(get_loop(), &fs_req->fs_req, fs_req->path, mode, simple_op_cb);
     if (result < 0)
     {
-        char *error = make_error_msg(context, result);
-        callback(fs_req, error);
+        char *error = make_error_msg(result);
+        callback(error, user_data);
+        free(fs_req->path);
+        free(fs_req);
     }
 }
 
-void fs_rename(void *context, const char *old_path, const char *new_path,
-               fs_callback_t callback)
+void fs_unlink(const char *path, fs_write_callback_t callback, void *user_data)
 {
-    FSRequest *fs_req;
-    const char *old_copy;
-    const char *new_copy;
-    int result;
-
-    if (!context || !old_path || !new_path || !callback)
-        return;
-
-    Req *req = (Req *)context;
-    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
-    if (!fs_req)
-        return;
-
-    memset(fs_req, 0, sizeof(FSRequest));
-    fs_req->context = context;
-    fs_req->callback = callback;
-    fs_req->fs_req.data = fs_req;
-
-    old_copy = arena_strdup(req->arena, old_path);
-    new_copy = arena_strdup(req->arena, new_path);
-
-    result = uv_fs_rename(get_loop(), &fs_req->fs_req, old_copy, new_copy, simple_op_cb);
-
-    if (result < 0)
-    {
-        char *error = make_error_msg(context, result);
-        callback(fs_req, error);
-    }
+    fs_simple_op(path, callback, user_data, uv_fs_unlink);
 }
 
-void fs_mkdir(void *context, const char *path, fs_callback_t callback)
+void fs_mkdir(const char *path, fs_write_callback_t callback, void *user_data)
 {
-    FSRequest *fs_req;
-    const char *path_copy;
-    int result;
-
-    if (!context || !path || !callback)
-        return;
-
-    Req *req = (Req *)context;
-    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
-    if (!fs_req)
-        return;
-
-    memset(fs_req, 0, sizeof(FSRequest));
-    fs_req->context = context;
-    fs_req->callback = callback;
-    fs_req->fs_req.data = fs_req;
-
-    path_copy = arena_strdup(req->arena, path);
-    result = uv_fs_mkdir(get_loop(), &fs_req->fs_req, path_copy, 0755, simple_op_cb);
-
-    if (result < 0)
-    {
-        char *error = make_error_msg(context, result);
-        callback(fs_req, error);
-    }
+    fs_simple_op_mode(path, callback, user_data, 0755, uv_fs_mkdir);
 }
 
-void fs_rmdir(void *context, const char *path, fs_callback_t callback)
+void fs_rmdir(const char *path, fs_write_callback_t callback, void *user_data)
 {
-    FSRequest *fs_req;
-    const char *path_copy;
-    int result;
+    fs_simple_op(path, callback, user_data, uv_fs_rmdir);
+}
 
-    if (!context || !path || !callback)
+void fs_rename(const char *old_path, const char *new_path,
+               fs_write_callback_t callback, void *user_data)
+{
+    if (!old_path || !new_path || !callback)
         return;
 
-    Req *req = (Req *)context;
-    fs_req = arena_alloc(req->arena, sizeof(FSRequest));
+    fs_request_t *fs_req = calloc(1, sizeof(fs_request_t));
     if (!fs_req)
         return;
 
-    memset(fs_req, 0, sizeof(FSRequest));
-    fs_req->context = context;
-    fs_req->callback = callback;
+    fs_req->user_data = user_data;
+    fs_req->write_callback = callback;
+    fs_req->path = strdup(new_path);
     fs_req->fs_req.data = fs_req;
 
-    path_copy = arena_strdup(req->arena, path);
-    result = uv_fs_rmdir(get_loop(), &fs_req->fs_req, path_copy, simple_op_cb);
+    if (!fs_req->path)
+    {
+        free(fs_req);
+        return;
+    }
 
+    char *old_copy = strdup(old_path);
+    if (!old_copy)
+    {
+        fs_request_cleanup(fs_req, false);
+        return;
+    }
+
+    int result = uv_fs_rename(get_loop(), &fs_req->fs_req, old_copy,
+                              fs_req->path, simple_op_cb);
+    free(old_copy);
+    
     if (result < 0)
     {
-        char *error = make_error_msg(context, result);
-        callback(fs_req, error);
+        char *error = make_error_msg(result);
+        callback(error, user_data);
+        fs_request_cleanup(fs_req, false);
     }
 }

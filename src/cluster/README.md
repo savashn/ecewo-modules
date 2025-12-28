@@ -1,6 +1,10 @@
 # CLUSTER
 
-Ecewo is a single-threaded framework by default. But even so, it's able to use all the threads of the system.
+Ecewo is a single-threaded framework by default. But even so, it's able to use all the threads of the system using cluster module.
+
+> [!WARNING]
+>
+> The cluster module supported on Linux only.
 
 ## Table of Contents
 
@@ -12,12 +16,6 @@ Ecewo is a single-threaded framework by default. But even so, it's able to use a
     2. [Worker Management](#worker-management)
     3. [Information Functions](#information-functions)
 
-> [!WARNING]
->
-> The cluster module works differently on Unix and Windows.
-> On Unix, all threads listen on the same port, while on Windows they each listen on different ports.
-> Therefore if you would like to use it on Windows, you should consider to stay on single thread or use Nginx.
-
 ## Core Concepts
 
 Cluster module provides multi-process clustering support for your application, enabling:
@@ -26,32 +24,13 @@ Cluster module provides multi-process clustering support for your application, e
 - Auto-restart - Crashed workers are automatically respawned
 - Load balancing - Distribute load across CPU cores
 - Zero-downtime updates - Gracefully restart workers one by one
-- Cross-platform - Works on Linux, Unix, macOS, and Windows
-
-All workers share the same port on Unix:
-
-```
-Worker 0 -> 127.0.0.1:3000
-Worker 1 -> 127.0.0.1:3000 (kernel load balancing)
-Worker 2 -> 127.0.0.1:3000 (kernel load balancing)
-Worker 3 -> 127.0.0.1:3000 (kernel load balancing)
-```
-
-Each worker gets a unique port on Windows:
-
-```
-Worker 0 -> 127.0.0.1:3000
-Worker 1 -> 127.0.0.1:3001
-Worker 2 -> 127.0.0.1:3002
-Worker 3 -> 127.0.0.1:3003
-```
 
 ## Usage
 
 ```c
 typedef struct
 {
-    uint8_t workers;                                 // Number of workers (1-255)
+    uint8_t cpus;                                    // Number of cpus
     bool respawn;                                    // Auto-respawn crashed workers
     uint16_t port;                                   // Port that will be listening
     void (*on_start)(uint8_t worker_id);             // On worker start process
@@ -71,9 +50,9 @@ void index_handler(Req *req, Res *res)
 int main(int argc, char *argv[])
 {
     Cluster config = {
-        .workers = cluster_cpu_count(),  // Or give a specific count
-        .respawn = true,                 // Respawn if one of them crash
-        .port = 3000                     // Port that will be listening
+        .cpus = cluster_cpus(), // Or give a specific count
+        .respawn = true,        // Respawn if one of them crash
+        .port = 3000            // Port that will be listening
     };
 
     if (cluster_init(&config, argc, argv))
@@ -83,10 +62,8 @@ int main(int argc, char *argv[])
     }
 
     server_init();
-    server_listen(cluster_get_port());
-    
     get("/", index_handler);
-    
+    server_listen(cluster_get_port());
     server_run();
     return 0;
 }
@@ -123,7 +100,7 @@ void on_exit(uint8_t worker_id, int status)
 int main(int argc, char *argv[])
 {
     Cluster config = {
-        .workers = cluster_cpu_count(),
+        .cpus = cluster_cpus(),
         .respawn = true,
         .port = 3000,
         .on_start = on_start,
@@ -296,10 +273,10 @@ Total number of configured workers.
 
 ---
 
-#### `cluster_cpu_count()`
+#### `cluster_cpus()`
 
 ```c
-uint8_t cluster_cpu_count(void);
+uint8_t cluster_cpus(void);
 ```
 
 **Returns:**  
@@ -308,7 +285,26 @@ Number of CPU cores available on the system.
 **Example:**
 ```c
 Cluster config = {
-    .workers = cluster_cpu_count(),  // Use all CPU cores
+    .cpus = cluster_cpus(),
+    .respawn = true
+};
+```
+
+---
+
+#### `cluster_cpus_physical()`
+
+```c
+uint8_t cluster_cpus_physical(void);
+```
+
+**Returns:**
+Number of Physical CPU cores available on the system.
+
+**Example:**
+```c
+Cluster config = {
+    .cpus = cluster_cpus_physical(),
     .respawn = true
 };
 ```

@@ -125,7 +125,7 @@ int main(void)
      * GET /images/logo.png -> ./public/images/logo.png
      */
     
-    shutdown_hook(app_cleanup);
+    server_atexit(app_cleanup);
     server_listen(3000);
     server_run();
     
@@ -168,7 +168,7 @@ int main(void)
       GET /images/logo.png -> ./public/images/logo.png
     */
     
-    shutdown_hook(app_cleanup);
+    server_atexit(app_cleanup);
     server_listen(3000);
     server_run();
     
@@ -217,7 +217,7 @@ int main(void)
      * 3. GET /* -> static files (fallback)
      */
     
-    shutdown_hook(cleanup_app);
+    server_atexit(cleanup_app);
     server_listen(3000);
     server_run();
     

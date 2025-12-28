@@ -3,12 +3,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <sys/stat.h>
-#include <time.h>
-
-// ========================================================================
-// MIME TYPE DETECTION
-// ========================================================================
 
 static const char *get_mime_type(const char *path)
 {
@@ -71,10 +65,6 @@ static const char *get_mime_type(const char *path)
     return "application/octet-stream";
 }
 
-// ========================================================================
-// SECURITY - PATH TRAVERSAL PREVENTION
-// ========================================================================
-
 static bool is_safe_path(const char *path)
 {
     if (strstr(path, "..") != NULL)
@@ -86,87 +76,103 @@ static bool is_safe_path(const char *path)
     return true;
 }
 
-// ========================================================================
-// CONTEXT MANAGEMENT (Global Lookup Table)
-// ========================================================================
-
 typedef struct
 {
     Res *res;
-    const char *filepath;
-    const char *mime_type;
-} send_file_ctx_t;
+    char *mime_type;
+} async_file_ctx_t;
 
-#define MAX_CONTEXTS 100
-static struct
+typedef struct
 {
-    Res *key;
-    send_file_ctx_t *value;
-} g_context_table[MAX_CONTEXTS];
-static int g_context_count = 0;
+    uv_write_t req;
+    char *data;
+} write_req_t;
 
-static void save_file_context(Res *res, send_file_ctx_t *ctx)
+static void on_write_complete(uv_write_t *req, int status)
 {
-    if (g_context_count < MAX_CONTEXTS)
-    {
-        g_context_table[g_context_count].key = res;
-        g_context_table[g_context_count].value = ctx;
-        g_context_count++;
-    }
+    (void)status;
+    write_req_t *wr = (write_req_t *)req;
+    if (wr->data)
+        free(wr->data);
+    free(wr);
 }
 
-static send_file_ctx_t *get_file_context(Res *res)
+static void send_response_manual(uv_tcp_t *socket, int status_code, 
+                                 const char *content_type,
+                                 const char *body, size_t body_len,
+                                 bool keep_alive)
 {
-    for (int i = 0; i < g_context_count; i++)
+    if (!socket || uv_is_closing((uv_handle_t *)socket))
+        return;
+
+    const char *status_text = "OK";
+    if (status_code == 404) status_text = "Not Found";
+    else if (status_code == 403) status_text = "Forbidden";
+    else if (status_code == 500) status_text = "Internal Server Error";
+
+    size_t header_size = 512;
+    size_t total_size = header_size + body_len;
+    char *response = malloc(total_size);
+    if (!response)
+        return;
+
+    int header_len = snprintf(response, header_size,
+        "HTTP/1.1 %d %s\r\n"
+        "Content-Type: %s\r\n"
+        "Content-Length: %zu\r\n"
+        "Connection: %s\r\n"
+        "\r\n",
+        status_code, status_text,
+        content_type,
+        body_len,
+        keep_alive ? "keep-alive" : "close");
+
+    if (body && body_len > 0)
+        memcpy(response + header_len, body, body_len);
+
+    write_req_t *wr = malloc(sizeof(write_req_t));
+    if (!wr)
     {
-        if (g_context_table[i].key == res)
-        {
-            return g_context_table[i].value;
-        }
-    }
-    return NULL;
-}
-
-static void remove_file_context(Res *res)
-{
-    for (int i = 0; i < g_context_count; i++)
-    {
-        if (g_context_table[i].key == res)
-        {
-            for (int j = i; j < g_context_count - 1; j++)
-            {
-                g_context_table[j] = g_context_table[j + 1];
-            }
-            g_context_count--;
-            break;
-        }
-    }
-}
-
-// ========================================================================
-// SEND FILE
-// ========================================================================
-
-static void on_file_read(FSRequest *fs_req, const char *error)
-{
-    Res *res = (Res *)fs_req->context;
-    send_file_ctx_t *ctx = get_file_context(res);
-
-    if (!ctx)
-    {
-        send_text(res, 500, "Internal error");
+        free(response);
         return;
     }
 
+    wr->data = response;
+    uv_buf_t buf = uv_buf_init(response, header_len + body_len);
+
+    if (uv_write(&wr->req, (uv_stream_t *)socket, &buf, 1, on_write_complete) != 0)
+    {
+        free(response);
+        free(wr);
+    }
+}
+
+static void send_error_manual(uv_tcp_t *socket, int status_code, const char *message)
+{
+    send_response_manual(socket, status_code, "text/plain", message, strlen(message), false);
+}
+
+static void on_file_read(const char *error, const char *data, size_t size, void *user_data)
+{
+    async_file_ctx_t *ctx = (async_file_ctx_t *)user_data;
+
+    ctx->res->replied = true;
+    
     if (error)
     {
-        remove_file_context(res);
-        send_text(res, 404, "File not found");
-        return;
+        send_text(ctx->res, 404, "File not found");
     }
-
-    reply(res, 200, ctx->mime_type, fs_req->data, fs_req->size);
-    remove_file_context(res);
+    else
+    {
+        set_header(ctx->res, "Content-Type", ctx->mime_type);
+        reply(ctx->res, 200, data, size);
+    }
+    
+    if (data)
+        free((void *)data);
+    
+    free(ctx->mime_type);
+    free(ctx);
 }
 
 void send_file(Res *res, const char *filepath)
@@ -184,7 +190,7 @@ void send_file(Res *res, const char *filepath)
         return;
     }
 
-    send_file_ctx_t *ctx = arena_alloc(res->arena, sizeof(send_file_ctx_t));
+    async_file_ctx_t *ctx = malloc(sizeof(async_file_ctx_t));
     if (!ctx)
     {
         send_text(res, 500, "Memory allocation failed");
@@ -192,17 +198,17 @@ void send_file(Res *res, const char *filepath)
     }
 
     ctx->res = res;
-    ctx->filepath = filepath;
-    ctx->mime_type = get_mime_type(filepath);
+    ctx->mime_type = strdup(get_mime_type(filepath));
 
-    save_file_context(res, ctx);
+    if (!ctx->mime_type)
+    {
+        free(ctx);
+        send_text(res, 500, "Memory allocation failed");
+        return;
+    }
 
-    fs_read_file(res, filepath, on_file_read);
+    fs_read_file(filepath, on_file_read, ctx);
 }
-
-// ========================================================================
-// SERVE STATIC (Middleware)
-// ========================================================================
 
 typedef struct
 {
@@ -263,21 +269,21 @@ static void static_handler(Req *req, Res *res)
         bool is_dir = (*rel_path == '\0' || 
                        (strlen(rel_path) > 0 && rel_path[strlen(rel_path) - 1] == '/'));
 
-        char *filepath;
+        char filepath[1024];
         if (is_dir)
         {
             if (strlen(rel_path) == 0)
             {
-                filepath = arena_sprintf(req->arena, "%s/%s", ctx->dir_path, ctx->options.index_file);
+                snprintf(filepath, sizeof(filepath), "%s/%s", ctx->dir_path, ctx->options.index_file);
             }
             else
             {
-                filepath = arena_sprintf(req->arena, "%s/%s%s", ctx->dir_path, rel_path, ctx->options.index_file);
+                snprintf(filepath, sizeof(filepath), "%s/%s%s", ctx->dir_path, rel_path, ctx->options.index_file);
             }
         }
         else
         {
-            filepath = arena_sprintf(req->arena, "%s/%s", ctx->dir_path, rel_path);
+            snprintf(filepath, sizeof(filepath), "%s/%s", ctx->dir_path, rel_path);
         }
 
         if (!is_safe_path(filepath))
@@ -304,7 +310,7 @@ void serve_static(const char *mount_path,
     }
 
     Static final_opts;
-    
+
     final_opts.index_file = "index.html";
     final_opts.enable_etag = false;
     final_opts.enable_cache = false;
@@ -374,9 +380,7 @@ void static_cleanup(void)
     }
 
     if (static_contexts.items)
-    {
         free(static_contexts.items);
-    }
 
     static_contexts.items = NULL;
     static_contexts.count = 0;

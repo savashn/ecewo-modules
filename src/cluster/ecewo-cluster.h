@@ -6,7 +6,7 @@
 
 typedef struct
 {
-    uint8_t workers;
+    uint8_t cpus;
     bool respawn;
     uint16_t port;
     void (*on_start)(uint8_t worker_id);
@@ -19,7 +19,8 @@ bool cluster_is_master(void);
 bool cluster_is_worker(void);
 uint8_t cluster_worker_id(void);
 uint8_t cluster_worker_count(void);
-uint8_t cluster_cpu_count(void);
+uint8_t cluster_cpus(void);
+uint8_t cluster_cpus_physical(void);
 void cluster_signal_workers(int signal);
 void cluster_wait_workers(void);
 

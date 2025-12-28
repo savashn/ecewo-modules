@@ -6,6 +6,10 @@
 #include <string.h>
 #include <stdio.h>
 
+// ========================================================================
+// TEST CASES
+// ========================================================================
+
 int test_static_serve_html(void)
 {
     MockParams params = {
@@ -38,6 +42,7 @@ int test_static_serve_index(void)
     MockResponse res = request(&params);
     
     ASSERT_EQ(200, res.status_code);
+    ASSERT_NOT_NULL(strstr(res.body, "<html>"));
     
     free_request(&res);
     RETURN_OK();
@@ -107,6 +112,7 @@ void setup_static_routes(void)
     if (r != 0 && r != UV_EEXIST)
     {
         fprintf(stderr, "Failed to create test_public: %s\n", uv_strerror(r));
+        return;
     }
     
     const char *index_content = "<html><body>Hello</body></html>";
@@ -117,7 +123,7 @@ void setup_static_routes(void)
     
     if (file >= 0)
     {
-        uv_buf_t buf = uv_buf_init((char*)index_content, strlen(index_content));
+        uv_buf_t buf = uv_buf_init((char *)index_content, strlen(index_content));
         uv_fs_write(NULL, &req, file, &buf, 1, -1, NULL);
         uv_fs_req_cleanup(&req);
         
@@ -133,7 +139,7 @@ void setup_static_routes(void)
     
     if (file >= 0)
     {
-        uv_buf_t buf = uv_buf_init((char*)env_content, strlen(env_content));
+        uv_buf_t buf = uv_buf_init((char *)env_content, strlen(env_content));
         uv_fs_write(NULL, &req, file, &buf, 1, -1, NULL);
         uv_fs_req_cleanup(&req);
         
@@ -142,6 +148,13 @@ void setup_static_routes(void)
     }
     
     serve_static("/", "./test_public", NULL);
+    
+    // Verify files exist
+    uv_fs_t stat_req;
+    int stat_result = uv_fs_stat(NULL, &stat_req, "test_public/index.html", NULL);
+    printf("DEBUG: index.html exists? %s (result=%d)\n", 
+           stat_result == 0 ? "YES" : "NO", stat_result);
+    uv_fs_req_cleanup(&stat_req);
 }
 
 void cleanup_static(void)

@@ -1,10 +1,10 @@
 # Async Database
 
-For asynchronous database queries, Ecewo provides the [`ecewo-postgres.h`](https://github.com/savashn/ecewo/tree/main/include/ecewo-postgres.h), which integrates [libpq](https://www.postgresql.org/docs/current/libpq.html) with Ecewo's event loop ([libuv](https://libuv.org/)) for non-blocking operations. This integration leverages PostgreSQL's native async capabilities, ensuring database queries never block the main thread.
+For asynchronous database queries, ecewo provides the [`ecewo-postgres.h`](https://github.com/savashn/ecewo/tree/main/include/ecewo-postgres.h), which integrates [libpq](https://www.postgresql.org/docs/current/libpq.html) with ecewo's event loop ([libuv](https://libuv.org/)) for non-blocking operations. This integration leverages PostgreSQL's native async capabilities, ensuring database queries never block the main thread.
 
 > [!IMPORTANT]
 > 
-> PostgreSQL is the only database with built-in async support in Ecewo. For other databases (MySQL, MongoDB, SQLite), use [workers](/docs/07.workers.md) for blocking queries. Or, consider implementing a [libuv](https://libuv.org/)-based integration similar to [ecewo-postgres module](https://github.com/savashn/ecewo/tree/main/src/modules/postgres.c).
+> PostgreSQL is the only database with built-in async support in ecewo. For other databases (MySQL, MongoDB, SQLite), use [workers](/docs/07.workers.md) for blocking queries. Or, consider implementing a [libuv](https://libuv.org/)-based integration similar to [ecewo-postgres module](https://github.com/savashn/ecewo/tree/main/src/modules/postgres.c).
 
 ## Table of Contents
 
@@ -201,7 +201,7 @@ int main(void)
 
     // Register routes here
     
-    shutdown_hook(cleanup_app);
+    server_atexit(cleanup_app);
 
     if (server_listen(3000) != SERVER_OK)
     {
