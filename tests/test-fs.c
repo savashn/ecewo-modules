@@ -21,6 +21,9 @@ static void on_read_complete(const char *error, const char *data, size_t size, v
     
     set_header(res, "Content-Type", "text/plain");
     reply(res, 200, data, size);
+    
+    if (data)
+        free((void *)data);
 }
 
 static void on_write_complete(const char *error, void *user_data)
