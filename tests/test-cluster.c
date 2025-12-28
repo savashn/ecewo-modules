@@ -83,32 +83,8 @@ int test_cluster_invalid_config(void)
     RETURN_OK();
 }
 
-#ifdef _WIN32
-int test_cluster_windows_port_strategy(void)
-{
-    Cluster config = {
-        .cpus = 3,
-        .respawn = true,
-        .port = 3000
-    };
 
-    bool result = cluster_init(&config, 0, NULL);
-    ASSERT_TRUE(result);
-
-    uint16_t expected_ports[] = {3000, 3001, 3002};
-
-    for (int i = 0; i < config.cpus; i++) {
-        uint16_t current_port = cluster_get_port();
-        ASSERT_EQ(expected_ports[i], current_port);
-    }
-
-    ASSERT_EQ(3000, config.port);
-    ASSERT_EQ(3, config.cpus);
-
-    RETURN_OK();
-}
-#else
-int test_cluster_unix_port_strategy(void)
+int test_cluster_port_strategy(void)
 {
     Cluster config = {
         .cpus = 4,
@@ -121,4 +97,3 @@ int test_cluster_unix_port_strategy(void)
 
     RETURN_OK();
 }
-#endif

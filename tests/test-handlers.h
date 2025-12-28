@@ -5,8 +5,7 @@
 int test_cluster_cpu_count(void);
 int test_cluster_callbacks(void);
 int test_cluster_invalid_config(void);
-int test_cluster_windows_port_strategy(void);
-int test_cluster_unix_port_strategy(void);
+int test_cluster_port_strategy(void);
 
 // cookie
 int test_cookie_set_simple(void);

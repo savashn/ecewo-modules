@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
 project(modules_test VERSION 1.0.0 LANGUAGES C)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Debug)
 
 include(FetchContent)
+
 FetchContent_Declare(
     ecewo
     GIT_REPOSITORY https://github.com/savashn/ecewo.git
@@ -14,8 +16,8 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(ecewo)
 
-add_executable(modules_test
-    src/cluster/ecewo-cluster.c
+# Base source files (always included)
+set(MODULE_SOURCES
     src/cookie/ecewo-cookie.c
     src/cors/ecewo-cors.c
     src/fs/ecewo-fs.c
@@ -24,7 +26,6 @@ add_executable(modules_test
     src/session/ecewo-session.c
     src/static/ecewo-static.c
     tests/test-runner.c
-    tests/test-cluster.c
     tests/test-cookie.c
     tests/test-cors.c
     tests/test-helmet.c
@@ -33,11 +34,9 @@ add_executable(modules_test
     tests/test-static.c
 )
 
-target_link_libraries(modules_test PRIVATE ecewo)
-
-target_include_directories(modules_test PRIVATE
+# Base include directories
+set(MODULE_INCLUDES
     ${CMAKE_SOURCE_DIR}/tests
-    ${CMAKE_SOURCE_DIR}/src/cluster
     ${CMAKE_SOURCE_DIR}/src/cookie
     ${CMAKE_SOURCE_DIR}/src/cors
     ${CMAKE_SOURCE_DIR}/src/fs
@@ -46,3 +45,23 @@ target_include_directories(modules_test PRIVATE
     ${CMAKE_SOURCE_DIR}/src/session
     ${CMAKE_SOURCE_DIR}/src/static
 )
+
+# Linux-only: Add cluster module
+if(UNIX AND NOT APPLE)
+    list(APPEND MODULE_SOURCES
+        src/cluster/ecewo-cluster.c
+        tests/test-cluster.c
+    )
+    list(APPEND MODULE_INCLUDES
+        ${CMAKE_SOURCE_DIR}/src/cluster
+    )
+    message(STATUS "Building with cluster support (Linux)")
+else()
+    message(STATUS "Cluster module disabled (not on Linux)")
+endif()
+
+add_executable(modules_test ${MODULE_SOURCES})
+
+target_link_libraries(modules_test PRIVATE ecewo)
+
+target_include_directories(modules_test PRIVATE ${MODULE_INCLUDES})

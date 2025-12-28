@@ -16,14 +16,12 @@ void setup_all_routes(void)
 
 int main(void)
 {
+#ifdef __linux__
     printf("--- Cluster Tests ---\n");
     RUN_TEST(test_cluster_cpu_count);
     RUN_TEST(test_cluster_callbacks);
     RUN_TEST(test_cluster_invalid_config);
-#ifdef _WIN32
-    RUN_TEST(test_cluster_windows_port_strategy);
-#else
-    RUN_TEST(test_cluster_unix_port_strategy);
+    RUN_TEST(test_cluster_port_strategy);
 #endif
     
     printf("\n--- Session Unit Tests ---\n");
