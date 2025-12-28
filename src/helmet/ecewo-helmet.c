@@ -16,7 +16,7 @@ static struct
     bool nosniff;
     bool ie_no_open;
     bool enabled;
-} helmet_state = {0};
+} helmet_state = { 0 };
 
 static const char *DEFAULT_CSP = NULL;
 static const char *DEFAULT_HSTS_MAX_AGE = "31536000"; // 1 year
@@ -48,8 +48,7 @@ static void helmet_middleware(Req *req, Res *res, Next next)
     if (helmet_state.csp)
         set_header(res, "Content-Security-Policy", helmet_state.csp);
 
-    if (helmet_state.hsts_max_age)
-    {
+    if (helmet_state.hsts_max_age) {
         char *hsts = arena_sprintf(req->arena, "max-age=%s", helmet_state.hsts_max_age);
 
         if (helmet_state.hsts_subdomains)
@@ -83,8 +82,7 @@ void helmet_init(const Helmet *config)
 {
     helmet_state.enabled = false;
 
-    if (config)
-    {
+    if (config) {
         helmet_state.csp = config->csp;
         helmet_state.hsts_max_age = config->hsts_max_age;
         helmet_state.hsts_subdomains = config->hsts_subdomains;
@@ -94,9 +92,7 @@ void helmet_init(const Helmet *config)
         helmet_state.xss_protection = config->xss_protection;
         helmet_state.nosniff = config->nosniff;
         helmet_state.ie_no_open = config->ie_no_open;
-    }
-    else
-    {
+    } else {
         helmet_state.csp = NULL;
         helmet_state.hsts_max_age = NULL;
         helmet_state.hsts_subdomains = false;

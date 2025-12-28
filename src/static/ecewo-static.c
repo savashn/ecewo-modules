@@ -97,18 +97,18 @@ static void on_write_complete(uv_write_t *req, int status)
     free(wr);
 }
 
-static void send_response_manual(uv_tcp_t *socket, int status_code, 
-                                 const char *content_type,
-                                 const char *body, size_t body_len,
-                                 bool keep_alive)
+static void send_response_manual(uv_tcp_t *socket, int status_code, const char *content_type, const char *body, size_t body_len, bool keep_alive)
 {
     if (!socket || uv_is_closing((uv_handle_t *)socket))
         return;
 
     const char *status_text = "OK";
-    if (status_code == 404) status_text = "Not Found";
-    else if (status_code == 403) status_text = "Forbidden";
-    else if (status_code == 500) status_text = "Internal Server Error";
+    if (status_code == 404)
+        status_text = "Not Found";
+    else if (status_code == 403)
+        status_text = "Forbidden";
+    else if (status_code == 500)
+        status_text = "Internal Server Error";
 
     size_t header_size = 512;
     size_t total_size = header_size + body_len;
@@ -117,22 +117,21 @@ static void send_response_manual(uv_tcp_t *socket, int status_code,
         return;
 
     int header_len = snprintf(response, header_size,
-        "HTTP/1.1 %d %s\r\n"
-        "Content-Type: %s\r\n"
-        "Content-Length: %zu\r\n"
-        "Connection: %s\r\n"
-        "\r\n",
-        status_code, status_text,
-        content_type,
-        body_len,
-        keep_alive ? "keep-alive" : "close");
+                              "HTTP/1.1 %d %s\r\n"
+                              "Content-Type: %s\r\n"
+                              "Content-Length: %zu\r\n"
+                              "Connection: %s\r\n"
+                              "\r\n",
+                              status_code, status_text,
+                              content_type,
+                              body_len,
+                              keep_alive ? "keep-alive" : "close");
 
     if (body && body_len > 0)
         memcpy(response + header_len, body, body_len);
 
     write_req_t *wr = malloc(sizeof(write_req_t));
-    if (!wr)
-    {
+    if (!wr) {
         free(response);
         return;
     }
@@ -140,8 +139,7 @@ static void send_response_manual(uv_tcp_t *socket, int status_code,
     wr->data = response;
     uv_buf_t buf = uv_buf_init(response, header_len + body_len);
 
-    if (uv_write(&wr->req, (uv_stream_t *)socket, &buf, 1, on_write_complete) != 0)
-    {
+    if (uv_write(&wr->req, (uv_stream_t *)socket, &buf, 1, on_write_complete) != 0) {
         free(response);
         free(wr);
     }
@@ -157,42 +155,36 @@ static void on_file_read(const char *error, const char *data, size_t size, void 
     async_file_ctx_t *ctx = (async_file_ctx_t *)user_data;
 
     ctx->res->replied = true;
-    
-    if (error)
-    {
+
+    if (error) {
         send_text(ctx->res, 404, "File not found");
-    }
-    else
-    {
+    } else {
         set_header(ctx->res, "Content-Type", ctx->mime_type);
         reply(ctx->res, 200, data, size);
     }
-    
+
     if (data)
         free((void *)data);
-    
+
     free(ctx->mime_type);
     free(ctx);
 }
 
 void send_file(Res *res, const char *filepath)
 {
-    if (!res || !filepath)
-    {
+    if (!res || !filepath) {
         if (res)
             send_text(res, 500, "Invalid arguments");
         return;
     }
 
-    if (!is_safe_path(filepath))
-    {
+    if (!is_safe_path(filepath)) {
         send_text(res, 403, "Forbidden");
         return;
     }
 
     async_file_ctx_t *ctx = malloc(sizeof(async_file_ctx_t));
-    if (!ctx)
-    {
+    if (!ctx) {
         send_text(res, 500, "Memory allocation failed");
         return;
     }
@@ -200,8 +192,7 @@ void send_file(Res *res, const char *filepath)
     ctx->res = res;
     ctx->mime_type = strdup(get_mime_type(filepath));
 
-    if (!ctx->mime_type)
-    {
+    if (!ctx->mime_type) {
         free(ctx);
         send_text(res, 500, "Memory allocation failed");
         return;
@@ -225,17 +216,15 @@ typedef struct
     int capacity;
 } static_ctx_array_t;
 
-static static_ctx_array_t static_contexts = {0};
+static static_ctx_array_t static_contexts = { 0 };
 
 static void ensure_static_capacity(void)
 {
-    if (static_contexts.count >= static_contexts.capacity)
-    {
+    if (static_contexts.count >= static_contexts.capacity) {
         int new_capacity = static_contexts.capacity == 0 ? 4 : static_contexts.capacity * 2;
         static_ctx_t **new_items = realloc(static_contexts.items,
                                            new_capacity * sizeof(static_ctx_t *));
-        if (!new_items)
-        {
+        if (!new_items) {
             fprintf(stderr, "serve_static: Memory allocation failed\n");
             return;
         }
@@ -248,8 +237,7 @@ static void static_handler(Req *req, Res *res)
 {
     const char *url_path = req->path;
 
-    for (int i = 0; i < static_contexts.count; i++)
-    {
+    for (int i = 0; i < static_contexts.count; i++) {
         static_ctx_t *ctx = static_contexts.items[i];
 
         if (strncmp(url_path, ctx->mount_path, ctx->mount_len) != 0)
@@ -259,35 +247,26 @@ static void static_handler(Req *req, Res *res)
         if (*rel_path == '/')
             rel_path++;
 
-        if (!ctx->options.dot_files && *rel_path == '.')
-        {
+        if (!ctx->options.dot_files && *rel_path == '.') {
             send_text(res, 403, "Forbidden");
             return;
         }
 
         // Check if this is a directory request (empty relative path or ends with /)
-        bool is_dir = (*rel_path == '\0' || 
-                       (strlen(rel_path) > 0 && rel_path[strlen(rel_path) - 1] == '/'));
+        bool is_dir = (*rel_path == '\0' || (strlen(rel_path) > 0 && rel_path[strlen(rel_path) - 1] == '/'));
 
         char filepath[1024];
-        if (is_dir)
-        {
-            if (strlen(rel_path) == 0)
-            {
+        if (is_dir) {
+            if (strlen(rel_path) == 0) {
                 snprintf(filepath, sizeof(filepath), "%s/%s", ctx->dir_path, ctx->options.index_file);
-            }
-            else
-            {
+            } else {
                 snprintf(filepath, sizeof(filepath), "%s/%s%s", ctx->dir_path, rel_path, ctx->options.index_file);
             }
-        }
-        else
-        {
+        } else {
             snprintf(filepath, sizeof(filepath), "%s/%s", ctx->dir_path, rel_path);
         }
 
-        if (!is_safe_path(filepath))
-        {
+        if (!is_safe_path(filepath)) {
             send_text(res, 403, "Forbidden");
             return;
         }
@@ -303,8 +282,7 @@ void serve_static(const char *mount_path,
                   const char *dir_path,
                   const Static *options)
 {
-    if (!mount_path || !dir_path)
-    {
+    if (!mount_path || !dir_path) {
         fprintf(stderr, "serve_static: Invalid arguments\n");
         return;
     }
@@ -317,8 +295,7 @@ void serve_static(const char *mount_path,
     final_opts.max_age = 3600;
     final_opts.dot_files = false;
 
-    if (options)
-    {
+    if (options) {
         if (options->index_file)
             final_opts.index_file = options->index_file;
         final_opts.enable_etag = options->enable_etag;
@@ -328,15 +305,13 @@ void serve_static(const char *mount_path,
     }
 
     ensure_static_capacity();
-    if (static_contexts.count >= static_contexts.capacity)
-    {
+    if (static_contexts.count >= static_contexts.capacity) {
         fprintf(stderr, "serve_static: Failed to allocate memory\n");
         return;
     }
 
     static_ctx_t *ctx = malloc(sizeof(static_ctx_t));
-    if (!ctx)
-    {
+    if (!ctx) {
         fprintf(stderr, "serve_static: Memory allocation failed\n");
         return;
     }
@@ -350,29 +325,24 @@ void serve_static(const char *mount_path,
 
     // Register exact mount path for directory access (e.g., "/" -> "/")
     get(mount_path, static_handler);
-    
+
     // Register wildcard pattern for all sub-paths (e.g., "/*" or "/assets/*")
     char *route_pattern = malloc(strlen(mount_path) + 4);
-    if (mount_path[strlen(mount_path) - 1] == '/')
-    {
+    if (mount_path[strlen(mount_path) - 1] == '/') {
         sprintf(route_pattern, "%s*", mount_path);
-    }
-    else
-    {
+    } else {
         sprintf(route_pattern, "%s/*", mount_path);
     }
-    
+
     get(route_pattern, static_handler);
     free(route_pattern);
 }
 
 void static_cleanup(void)
 {
-    for (int i = 0; i < static_contexts.count; i++)
-    {
+    for (int i = 0; i < static_contexts.count; i++) {
         static_ctx_t *ctx = static_contexts.items[i];
-        if (ctx)
-        {
+        if (ctx) {
             free(ctx->mount_path);
             free(ctx->dir_path);
             free(ctx);

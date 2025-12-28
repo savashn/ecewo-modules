@@ -23,7 +23,7 @@ int main(void)
     RUN_TEST(test_cluster_invalid_config);
     RUN_TEST(test_cluster_port_strategy);
 #endif
-    
+
     printf("\n--- Session Unit Tests ---\n");
     session_init();
     RUN_TEST(test_session_value_set_get);
@@ -32,18 +32,17 @@ int main(void)
     RUN_TEST(test_session_find);
     RUN_TEST(test_session_utf8_values);
     session_cleanup();
-    
+
     printf("\n--- HTTP Integration Tests ---\n");
-    
-    if (mock_init(setup_all_routes) != 0)
-    {
+
+    if (mock_init(setup_all_routes) != 0) {
         printf("ERROR: Failed to initialize mock server\n");
         return 1;
     }
 
     printf("DEBUG: Mock initialized, routes should be set up\n");
     fflush(stdout);
-    
+
     printf("\n--- Cookie Tests ---\n");
     RUN_TEST(test_cookie_set_simple);
     RUN_TEST(test_cookie_set_complex);
@@ -52,19 +51,19 @@ int main(void)
     RUN_TEST(test_cookie_get_multiple);
     RUN_TEST(test_cookie_delete);
     RUN_TEST(test_cookie_url_encoded);
-    
+
     printf("\n--- CORS Tests ---\n");
     RUN_TEST(test_cors_simple_request);
     RUN_TEST(test_cors_no_origin);
-    
+
     printf("\n--- Helmet Tests ---\n");
     RUN_TEST(test_helmet_default_headers);
     RUN_TEST(test_helmet_custom_config);
-    
+
     printf("\n--- Session HTTP Tests ---\n");
     RUN_TEST(test_session_create);
     RUN_TEST(test_session_no_session);
-    
+
     printf("\n--- File System Tests ---\n");
     RUN_TEST(test_fs_read_existing_file);
     printf("DEBUG: After first FS test\n");
@@ -73,7 +72,7 @@ int main(void)
     RUN_TEST(test_fs_write_file);
     RUN_TEST(test_fs_stat_file);
     RUN_TEST(test_fs_missing_parameter);
-    
+
     printf("\n--- Static File Tests ---\n");
     fflush(stdout);
     printf("DEBUG: About to run static tests\n");
@@ -83,15 +82,15 @@ int main(void)
     RUN_TEST(test_static_not_found);
     RUN_TEST(test_static_dotfile_blocked);
     RUN_TEST(test_static_path_traversal_blocked);
-    
+
     cleanup_session();
     cleanup_fs();
     cleanup_static();
     mock_cleanup();
-    
+
     printf("\n========================================\n");
     printf("         ALL TESTS COMPLETED\n");
     printf("========================================\n\n");
-    
+
     return 0;
 }

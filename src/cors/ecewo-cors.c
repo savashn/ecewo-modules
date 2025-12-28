@@ -12,7 +12,7 @@ static struct
     const char *credentials;
     const char *max_age;
     bool enabled;
-} cors_state = {0};
+} cors_state = { 0 };
 
 // DEFAULTS
 static const char *DEFAULT_ORIGIN = "*";
@@ -53,20 +53,15 @@ static void cors_middleware(Req *req, Res *res, Next next)
 
     const char *request_origin = get_header(req, "Origin");
 
-    if (req->method && strcmp(req->method, "OPTIONS") == 0)
-    {
-        if (request_origin && !is_origin_allowed(request_origin))
-        {
+    if (req->method && strcmp(req->method, "OPTIONS") == 0) {
+        if (request_origin && !is_origin_allowed(request_origin)) {
             send_text(res, 403, "CORS: Origin not allowed");
             return;
         }
 
-        if (strcmp(cors_state.origin, "*") == 0)
-        {
+        if (strcmp(cors_state.origin, "*") == 0) {
             set_header(res, "Access-Control-Allow-Origin", "*");
-        }
-        else if (request_origin)
-        {
+        } else if (request_origin) {
             set_header(res, "Access-Control-Allow-Origin", request_origin);
         }
 
@@ -82,19 +77,15 @@ static void cors_middleware(Req *req, Res *res, Next next)
 
     bool should_add = false;
 
-    if (strcmp(cors_state.origin, "*") == 0)
-    {
+    if (strcmp(cors_state.origin, "*") == 0) {
         set_header(res, "Access-Control-Allow-Origin", "*");
         should_add = true;
-    }
-    else if (request_origin && is_origin_allowed(request_origin))
-    {
+    } else if (request_origin && is_origin_allowed(request_origin)) {
         set_header(res, "Access-Control-Allow-Origin", request_origin);
         should_add = true;
     }
 
-    if (should_add)
-    {
+    if (should_add) {
         set_header(res, "Access-Control-Allow-Methods", cors_state.methods);
         set_header(res, "Access-Control-Allow-Headers", cors_state.headers);
         set_header(res, "Access-Control-Allow-Credentials", cors_state.credentials);
@@ -107,16 +98,13 @@ void cors_init(const Cors *config)
 {
     cors_state.enabled = false;
 
-    if (config)
-    {
+    if (config) {
         cors_state.origin = config->origin;
         cors_state.methods = config->methods;
         cors_state.headers = config->headers;
         cors_state.credentials = config->credentials;
         cors_state.max_age = config->max_age;
-    }
-    else
-    {
+    } else {
         cors_state.origin = NULL;
         cors_state.methods = NULL;
         cors_state.headers = NULL;

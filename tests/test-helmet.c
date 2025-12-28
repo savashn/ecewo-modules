@@ -18,12 +18,12 @@ int test_helmet_default_headers(void)
         .headers = NULL,
         .header_count = 0
     };
-    
+
     MockResponse res = request(&params);
-    
+
     ASSERT_EQ(200, res.status_code);
     ASSERT_EQ_STR("Helmet OK", res.body);
-    
+
     free_request(&res);
     RETURN_OK();
 }
@@ -37,11 +37,11 @@ int test_helmet_custom_config(void)
         .headers = NULL,
         .header_count = 0
     };
-    
+
     MockResponse res = request(&params);
-    
+
     ASSERT_EQ(200, res.status_code);
-    
+
     free_request(&res);
     RETURN_OK();
 }

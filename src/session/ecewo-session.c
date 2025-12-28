@@ -18,8 +18,8 @@ static Session *sessions = NULL;
 static int max_sessions = 0;
 static int initialized = 0;
 
-#define KV_DELIMITER '\x1F'        // ASCII Unit Separator - separates key from value
-#define PAIR_DELIMITER '\x1E'      // ASCII Record Separator - separates key-value pairs
+#define KV_DELIMITER '\x1F' // ASCII Unit Separator - separates key from value
+#define PAIR_DELIMITER '\x1E' // ASCII Record Separator - separates key-value pairs
 #define MAX_SESSION_DATA_SIZE 4096
 
 static const Cookie SESSION_COOKIE_DEFAULTS = {
@@ -48,17 +48,12 @@ static char *url_encode(const char *str)
         return NULL;
 
     size_t j = 0;
-    for (size_t i = 0; i < len && j < encoded_len - 3; i++)
-    {
-        if (is_url_safe(str[i]))
-        {
+    for (size_t i = 0; i < len && j < encoded_len - 3; i++) {
+        if (is_url_safe(str[i])) {
             encoded[j++] = str[i];
-        }
-        else
-        {
+        } else {
             int written = snprintf(encoded + j, encoded_len - j, "%%%02X", (unsigned char)str[i]);
-            if (written < 0 || written >= (int)(encoded_len - j))
-            {
+            if (written < 0 || written >= (int)(encoded_len - j)) {
                 free(encoded);
                 return NULL;
             }
@@ -91,24 +86,17 @@ static char *url_decode(const char *str)
         return NULL;
 
     size_t j = 0;
-    for (size_t i = 0; i < len; i++)
-    {
-        if (str[i] == '%' && i + 2 < len)
-        {
+    for (size_t i = 0; i < len; i++) {
+        if (str[i] == '%' && i + 2 < len) {
             int high = hex_to_int(str[i + 1]);
             int low = hex_to_int(str[i + 2]);
-            if (high >= 0 && low >= 0)
-            {
+            if (high >= 0 && low >= 0) {
                 decoded[j++] = (char)(high * 16 + low);
                 i += 2;
-            }
-            else
-            {
+            } else {
                 decoded[j++] = str[i];
             }
-        }
-        else
-        {
+        } else {
             decoded[j++] = str[i];
         }
     }
@@ -122,8 +110,7 @@ static char *safe_strdup(const char *str)
         return NULL;
     size_t len = strlen(str);
     char *copy = malloc(len + 1);
-    if (copy)
-    {
+    if (copy) {
         memcpy(copy, str, len + 1);
     }
     return copy;
@@ -149,10 +136,8 @@ void session_cleanup(void)
     if (!initialized)
         return;
 
-    for (int i = 0; i < max_sessions; i++)
-    {
-        if (sessions[i].id[0] != '\0' && sessions[i].data != NULL)
-        {
+    for (int i = 0; i < max_sessions; i++) {
+        if (sessions[i].id[0] != '\0' && sessions[i].data != NULL) {
             free(sessions[i].data);
             sessions[i].data = NULL;
         }
@@ -173,8 +158,7 @@ static int resize_sessions(int new_capacity)
     if (!new_sessions)
         return 0;
 
-    for (int i = max_sessions; i < new_capacity; i++)
-    {
+    for (int i = max_sessions; i < new_capacity; i++) {
         memset(&new_sessions[i], 0, sizeof(Session));
     }
 
@@ -189,8 +173,7 @@ static int get_random_bytes(unsigned char *buffer, size_t length)
     HCRYPTPROV hCryptProv;
     int result = 0;
 
-    if (CryptAcquireContext(&hCryptProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
-    {
+    if (CryptAcquireContext(&hCryptProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
         if (CryptGenRandom(hCryptProv, (DWORD)length, buffer))
             result = 1;
         CryptReleaseContext(hCryptProv, 0);
@@ -202,11 +185,9 @@ static int get_random_bytes(unsigned char *buffer, size_t length)
         return 0;
 
     size_t bytes_read = 0;
-    while (bytes_read < length)
-    {
+    while (bytes_read < length) {
         ssize_t result = read(fd, buffer + bytes_read, length - bytes_read);
-        if (result < 0)
-        {
+        if (result < 0) {
             if (errno == EINTR)
                 continue;
             close(fd);
@@ -224,8 +205,7 @@ static void generate_session_id(char *buffer)
 {
     unsigned char entropy[SESSION_ID_LEN];
 
-    if (!get_random_bytes(entropy, SESSION_ID_LEN))
-    {
+    if (!get_random_bytes(entropy, SESSION_ID_LEN)) {
         fprintf(stderr, "Random generation failed, using fallback method\n");
 
         unsigned int seed = (unsigned int)time(NULL);
@@ -242,8 +222,7 @@ static void generate_session_id(char *buffer)
         seed ^= ((uintptr_t)stack_var >> 3);
 
         srand(seed);
-        for (size_t i = 0; i < SESSION_ID_LEN; i++)
-        {
+        for (size_t i = 0; i < SESSION_ID_LEN; i++) {
             entropy[i] = (unsigned char)(rand() & 0xFF);
         }
     }
@@ -251,8 +230,7 @@ static void generate_session_id(char *buffer)
     const char charset[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     const size_t charset_len = sizeof(charset) - 1;
 
-    for (size_t i = 0; i < SESSION_ID_LEN; i++)
-    {
+    for (size_t i = 0; i < SESSION_ID_LEN; i++) {
         buffer[i] = charset[entropy[i] % charset_len];
     }
 
@@ -264,8 +242,7 @@ static void generate_session_id(char *buffer)
 static void cleanup_expired_sessions(void)
 {
     time_t now = time(NULL);
-    for (int i = 0; i < max_sessions; i++)
-    {
+    for (int i = 0; i < max_sessions; i++) {
         if (sessions[i].id[0] != '\0' && sessions[i].expires < now)
             session_free(&sessions[i]);
     }
@@ -279,17 +256,14 @@ Session *session_create(int max_age)
     cleanup_expired_sessions();
 
     int slot = -1;
-    for (int i = 0; i < max_sessions; i++)
-    {
-        if (sessions[i].id[0] == '\0')
-        {
+    for (int i = 0; i < max_sessions; i++) {
+        if (sessions[i].id[0] == '\0') {
             slot = i;
             break;
         }
     }
 
-    if (slot < 0)
-    {
+    if (slot < 0) {
         if (!resize_sessions(max_sessions * 2))
             return NULL;
         slot = max_sessions / 2;
@@ -300,8 +274,7 @@ Session *session_create(int max_age)
 
     free(sessions[slot].data);
     sessions[slot].data = safe_strdup("");
-    if (!sessions[slot].data)
-    {
+    if (!sessions[slot].data) {
         sessions[slot].id[0] = '\0';
         return NULL;
     }
@@ -315,12 +288,8 @@ Session *session_find(const char *id)
         return NULL;
 
     time_t now = time(NULL);
-    for (int i = 0; i < max_sessions; i++)
-    {
-        if (sessions[i].id[0] != '\0' &&
-            strcmp(sessions[i].id, id) == 0 &&
-            sessions[i].expires >= now)
-        {
+    for (int i = 0; i < max_sessions; i++) {
+        if (sessions[i].id[0] != '\0' && strcmp(sessions[i].id, id) == 0 && sessions[i].expires >= now) {
             return &sessions[i];
         }
     }
@@ -335,28 +304,22 @@ static void remove_key_from_data(char *data, const char *encoded_key)
 
     char *search_start = data;
 
-    while (search_start && *search_start)
-    {
+    while (search_start && *search_start) {
         char *key_end = strchr(search_start, KV_DELIMITER);
         if (!key_end)
             break;
 
         size_t key_len = key_end - search_start;
 
-        if (key_len == strlen(encoded_key) &&
-            strncmp(search_start, encoded_key, key_len) == 0)
-        {
+        if (key_len == strlen(encoded_key) && strncmp(search_start, encoded_key, key_len) == 0) {
             char *value_start = key_end + 1;
             char *pair_end = strchr(value_start, PAIR_DELIMITER);
 
-            if (pair_end)
-            {
+            if (pair_end) {
                 char *after_pair = pair_end + 1;
                 size_t remaining_len = strlen(after_pair);
                 memmove(search_start, after_pair, remaining_len + 1);
-            }
-            else
-            {
+            } else {
                 *search_start = '\0';
             }
             break;
@@ -374,8 +337,7 @@ void session_value_set(Session *sess, const char *key, const char *value)
 
     char *encoded_key = url_encode(key);
     char *encoded_value = url_encode(value);
-    if (!encoded_key || !encoded_value)
-    {
+    if (!encoded_key || !encoded_value) {
         if (encoded_key)
             free(encoded_key);
         else if (encoded_value)
@@ -388,8 +350,7 @@ void session_value_set(Session *sess, const char *key, const char *value)
     size_t value_len = strlen(encoded_value);
     size_t additional_size = key_len + value_len + 2; // KV_DELIMITER + PAIR_DELIMITER
 
-    if (current_len + additional_size > MAX_SESSION_DATA_SIZE)
-    {
+    if (current_len + additional_size > MAX_SESSION_DATA_SIZE) {
         fprintf(stderr, "Session data size limit exceeded\n");
         free(encoded_key);
         free(encoded_value);
@@ -403,14 +364,10 @@ void session_value_set(Session *sess, const char *key, const char *value)
     size_t new_len = current_len + key_len + value_len + 3; // key + KV_DELIM + value + PAIR_DELIM + null
 
     char *new_data = malloc(new_len);
-    if (new_data)
-    {
-        if (current_len > 0)
-        {
+    if (new_data) {
+        if (current_len > 0) {
             strcpy(new_data, sess->data);
-        }
-        else
-        {
+        } else {
             new_data[0] = '\0';
         }
 
@@ -446,25 +403,21 @@ char *session_value_get(Session *sess, const char *key)
     char *search_start = sess->data;
     char *result = NULL;
 
-    while (search_start && *search_start)
-    {
+    while (search_start && *search_start) {
         char *key_end = strchr(search_start, KV_DELIMITER);
         if (!key_end)
             break;
 
         size_t key_len = key_end - search_start;
 
-        if (key_len == strlen(encoded_key) &&
-            strncmp(search_start, encoded_key, key_len) == 0)
-        {
+        if (key_len == strlen(encoded_key) && strncmp(search_start, encoded_key, key_len) == 0) {
             char *value_start = key_end + 1;
             char *value_end = strchr(value_start, PAIR_DELIMITER);
 
             size_t value_len = value_end ? (size_t)(value_end - value_start) : strlen(value_start);
 
             char *encoded_value = malloc(value_len + 1);
-            if (encoded_value)
-            {
+            if (encoded_value) {
                 strncpy(encoded_value, value_start, value_len);
                 encoded_value[value_len] = '\0';
 
@@ -502,8 +455,7 @@ void session_free(Session *sess)
 
     memset(sess->id, 0, sizeof(sess->id));
     sess->expires = 0;
-    if (sess->data)
-    {
+    if (sess->data) {
         free(sess->data);
         sess->data = NULL;
     }
@@ -525,8 +477,7 @@ void session_print_all(void)
     time_t now = time(NULL);
     printf("=== Sessions ===\n");
 
-    for (int i = 0; i < max_sessions; i++)
-    {
+    for (int i = 0; i < max_sessions; i++) {
         Session *s = &sessions[i];
         if (s->id[0] == '\0')
             continue;
@@ -534,16 +485,13 @@ void session_print_all(void)
         printf("[#%02d] id=%.8s..., expires in %lds\n",
                i, s->id, (long)(s->expires - now));
 
-        if (s->data && strlen(s->data) > 0)
-        {
+        if (s->data && strlen(s->data) > 0) {
             char *data_copy = safe_strdup(s->data);
-            if (data_copy)
-            {
+            if (data_copy) {
                 char *pair_start = data_copy;
                 int pair_count = 0;
 
-                while (pair_start && *pair_start)
-                {
+                while (pair_start && *pair_start) {
                     char *key_end = strchr(pair_start, KV_DELIMITER);
                     if (!key_end)
                         break;
@@ -574,9 +522,7 @@ void session_print_all(void)
 
                 free(data_copy);
             }
-        }
-        else
-        {
+        } else {
             printf("      (empty)\n");
         }
     }
@@ -585,8 +531,7 @@ void session_print_all(void)
 
 void session_send(Res *res, Session *sess, Cookie *options)
 {
-    if (!res || !sess || sess->id[0] == '\0')
-    {
+    if (!res || !sess || sess->id[0] == '\0') {
         fprintf(stderr, "Error on session sending\n");
         return;
     }

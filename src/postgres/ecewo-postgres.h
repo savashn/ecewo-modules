@@ -10,12 +10,12 @@ typedef void (*pg_result_cb_t)(PGquery *pg, PGresult *result, void *data);
 
 PGquery *query_create(PGconn *existing_conn, void *data);
 
-int query_queue(PGquery *pg,              // Query context from query_create()
-                const char *sql,          // SQL query string (will be copied)
-                int param_count,          // Number of parameters
-                const char **params,      // Parameter values (will be copied)
+int query_queue(PGquery *pg, // Query context from query_create()
+                const char *sql, // SQL query string (will be copied)
+                int param_count, // Number of parameters
+                const char **params, // Parameter values (will be copied)
                 pg_result_cb_t result_cb, // Callback for query results
-                void *query_data);        // User data for this specific query
+                void *query_data); // User data for this specific query
 
 int query_execute(PGquery *pg);
 

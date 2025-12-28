@@ -31,7 +31,7 @@ void test_worker_exit_callback(uint8_t worker_id, int status)
 int test_cluster_cpu_count(void)
 {
     uint8_t cpu_count = cluster_cpus();
-    
+
     ASSERT_GT(cpu_count, 1);
     ASSERT_LE(cpu_count, 255);
 
@@ -42,7 +42,7 @@ int test_cluster_callbacks(void)
 {
     worker_started = false;
     worker_exited = false;
-    
+
     Cluster config = {
         .cpus = 2,
         .respawn = true,
@@ -50,7 +50,7 @@ int test_cluster_callbacks(void)
         .on_start = test_worker_start_callback,
         .on_exit = test_worker_exit_callback
     };
-    
+
     ASSERT_NOT_NULL(config.on_start);
     ASSERT_NOT_NULL(config.on_exit);
 
@@ -59,7 +59,7 @@ int test_cluster_callbacks(void)
 
 int test_cluster_invalid_config(void)
 {
-    Cluster* null_config = NULL;
+    Cluster *null_config = NULL;
 
     bool init_result = cluster_init(null_config, 0, NULL);
     ASSERT_FALSE(init_result);
@@ -83,7 +83,6 @@ int test_cluster_invalid_config(void)
     RETURN_OK();
 }
 
-
 int test_cluster_port_strategy(void)
 {
     Cluster config = {
@@ -91,7 +90,7 @@ int test_cluster_port_strategy(void)
         .respawn = true,
         .port = 3000
     };
-    
+
     ASSERT_EQ(3000, config.port);
     ASSERT_EQ(4, config.cpus);
 

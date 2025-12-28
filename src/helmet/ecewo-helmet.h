@@ -14,12 +14,12 @@ typedef struct
     bool hsts_preload;
 
     // Other Security Headers
-    const char *frame_options;   // "DENY", "SAMEORIGIN"
+    const char *frame_options; // "DENY", "SAMEORIGIN"
     const char *referrer_policy; // e.g., "strict-origin-when-cross-origin"
-    const char *xss_protection;  // "0" or "1; mode=block"
+    const char *xss_protection; // "0" or "1; mode=block"
 
     // Flags
-    bool nosniff;    // X-Content-Type-Options: nosniff
+    bool nosniff; // X-Content-Type-Options: nosniff
     bool ie_no_open; // X-Download-Options: noopen
 } Helmet;
 
