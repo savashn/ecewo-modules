@@ -1,6 +1,10 @@
 #ifndef ECEWO_HELMET_H
 #define ECEWO_HELMET_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 typedef struct
@@ -24,5 +28,9 @@ typedef struct
 } Helmet;
 
 void helmet_init(const Helmet *config);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

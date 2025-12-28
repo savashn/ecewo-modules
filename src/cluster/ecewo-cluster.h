@@ -1,6 +1,10 @@
 #ifndef ECEWO_CLUSTER_H
 #define ECEWO_CLUSTER_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -23,5 +27,9 @@ uint8_t cluster_cpus(void);
 uint8_t cluster_cpus_physical(void);
 void cluster_signal_workers(int signal);
 void cluster_wait_workers(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

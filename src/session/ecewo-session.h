@@ -1,6 +1,10 @@
 #ifndef ECEWO_SESSION_H
 #define ECEWO_SESSION_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <time.h>
 #include <stdint.h>
 #include "ecewo.h"
@@ -39,5 +43,9 @@ void session_send(Res *res, Session *sess, Cookie *options);
 void session_destroy(Res *res, Session *sess, Cookie *options);
 
 void session_print_all(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

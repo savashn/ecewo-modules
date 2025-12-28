@@ -1,5 +1,9 @@
-#ifndef MOCK_H
-#define MOCK_H
+#ifndef ECEWO_MOCK_H
+#define ECEWO_MOCK_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stdint.h>
 
@@ -46,5 +50,9 @@ int mock_init(test_routes_cb_t routes_callback);
 void mock_cleanup(void);
 
 const char *mock_get_header(MockResponse *res, const char *key);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

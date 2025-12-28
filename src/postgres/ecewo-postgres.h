@@ -1,6 +1,10 @@
 #ifndef ECEWO_POSTGRES_H
 #define ECEWO_POSTGRES_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "libpq-fe.h"
 
 typedef struct pg_async_s PGquery;
@@ -18,5 +22,9 @@ int query_queue(PGquery *pg, // Query context from query_create()
                 void *query_data); // User data for this specific query
 
 int query_execute(PGquery *pg);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,10 @@
 #ifndef ECEWO_CORS_H
 #define ECEWO_CORS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct
 {
     const char *origin; // Default: "*"
@@ -11,5 +15,9 @@ typedef struct
 } Cors;
 
 void cors_init(const Cors *config);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

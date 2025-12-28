@@ -1,6 +1,10 @@
 #ifndef ECEWO_COOKIE_H
 #define ECEWO_COOKIE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "ecewo.h"
 #include <stdbool.h>
 
@@ -16,5 +20,9 @@ typedef struct
 
 char *cookie_get(Req *req, const char *name);
 void cookie_set(Res *res, const char *name, const char *value, Cookie *options);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
