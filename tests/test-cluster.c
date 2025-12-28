@@ -30,7 +30,7 @@ void test_worker_exit_callback(uint8_t worker_id, int status)
 
 int test_cluster_cpu_count(void)
 {
-    uint8_t cpu_count = cluster_cpu_count();
+    uint8_t cpu_count = cluster_cpus();
     
     ASSERT_GT(cpu_count, 1);
     ASSERT_LE(cpu_count, 255);
@@ -44,7 +44,7 @@ int test_cluster_callbacks(void)
     worker_exited = false;
     
     Cluster config = {
-        .workers = 2,
+        .cpus = 2,
         .respawn = true,
         .port = 3000,
         .on_start = test_worker_start_callback,
@@ -65,7 +65,7 @@ int test_cluster_invalid_config(void)
     ASSERT_FALSE(init_result);
 
     Cluster invalid_workers = {
-        .workers = 0,
+        .cpus = 0,
         .port = 3000
     };
 
@@ -73,7 +73,7 @@ int test_cluster_invalid_config(void)
     ASSERT_FALSE(init_result);
 
     Cluster invalid_port = {
-        .workers = 2,
+        .cpus = 2,
         .port = 0
     };
 
@@ -87,7 +87,7 @@ int test_cluster_invalid_config(void)
 int test_cluster_windows_port_strategy(void)
 {
     Cluster config = {
-        .workers = 3,
+        .cpus = 3,
         .respawn = true,
         .port = 3000
     };
@@ -97,13 +97,13 @@ int test_cluster_windows_port_strategy(void)
 
     uint16_t expected_ports[] = {3000, 3001, 3002};
 
-    for (int i = 0; i < config.workers; i++) {
+    for (int i = 0; i < config.cpus; i++) {
         uint16_t current_port = cluster_get_port();
         ASSERT_EQ(expected_ports[i], current_port);
     }
 
     ASSERT_EQ(3000, config.port);
-    ASSERT_EQ(3, config.workers);
+    ASSERT_EQ(3, config.cpus);
 
     RETURN_OK();
 }
@@ -111,13 +111,13 @@ int test_cluster_windows_port_strategy(void)
 int test_cluster_unix_port_strategy(void)
 {
     Cluster config = {
-        .workers = 4,
+        .cpus = 4,
         .respawn = true,
         .port = 3000
     };
     
     ASSERT_EQ(3000, config.port);
-    ASSERT_EQ(4, config.workers);
+    ASSERT_EQ(4, config.cpus);
 
     RETURN_OK();
 }
