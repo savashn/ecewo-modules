@@ -4,7 +4,9 @@ For asynchronous database queries, ecewo provides the [`ecewo-postgres.h`](https
 
 > [!IMPORTANT]
 > 
-> PostgreSQL is the only database with built-in async support in ecewo. For other databases (MySQL, MongoDB, SQLite), use [workers](/docs/07.workers.md) for blocking queries. Or, consider implementing a [libuv](https://libuv.org/)-based integration similar to [ecewo-postgres module](https://github.com/savashn/ecewo/tree/main/src/modules/postgres.c).
+> PostgreSQL is the only supported database in ecewo with async features, and this module is not finished yet. So there might be breaking changes at any time.
+>
+> For other databases (MySQL, MongoDB, SQLite), use [workers](/docs/07.workers.md) for blocking queries. Or, consider implementing a [libuv](https://libuv.org/)-based integration similar to ecewo-postgres module.
 
 ## Table of Contents
 
@@ -16,8 +18,9 @@ For asynchronous database queries, ecewo provides the [`ecewo-postgres.h`](https
     1. [Database Connection](#database-connection)
     2. [Main Setup](#main-setup)
 3. [Usage](#usage)
-    1. [Writing An Async Query](#writing-an-async-query)
-    2. [Register and Run](#register-and-run)
+    1. [Async Querying Example](#async-querying-example)
+    2. [Running Parallel Queries](#running-parallel-queries)
+    3. [Fire-and-Forget](#fire-and-forget)
 4. [API Reference](#api-reference)
     1. [`query_create()`](#query_create)
     2. [`query_queue()`](#query_queue)
@@ -71,6 +74,10 @@ target_link_libraries(server PRIVATE
     ${PostgreSQL_LIBRARIES}
 )
 ```
+
+### Add `ecewo-postgres` Files
+
+Download [`ecewo-postgres.c`](https://github.com/savashn/ecewo-modules/blob/main/src/postgres/ecewo-postgres.c) and [`ecewo-postgres.h`](https://github.com/savashn/ecewo-modules/blob/main/src/postgres/ecewo-postgres.h) files from this repo and add them to your project.
 
 ## Database Configuration
 
@@ -216,7 +223,7 @@ int main(void)
 
 ## Usage
 
-### Writing An Async Query
+### Async Querying Example
 
 Now let's write an example async handler. Here's what we are going to do step by step:
 
@@ -224,14 +231,14 @@ Now let's write an example async handler. Here's what we are going to do step by
 2. Check if the `name` and `surname` already exists
 3. If they don't, we'll insert.
 
-> [!INFO]
+> [!NOTE]
 >
 > In this example, we take the parameters from `req->query` instead of `req->body`. Because it will be simplier to show an example considering using an external library for JSON parsing.
 
 ```c
 #include "ecewo.h"
 #include "ecewo-postgres.h"
-#include "db.h"
+#include "connection.h"
 #include <stdio.h>
 
 // Callback structure
@@ -252,7 +259,7 @@ void create_person_handler(Req *req, Res *res)
     const char *name = get_query(req, "name");
     const char *surname = get_query(req, "surname");
 
-    ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
         send_text(res, 500, "Context allocation failed");
@@ -264,7 +271,7 @@ void create_person_handler(Req *req, Res *res)
     ctx->surname = surname;
 
     // Create async PostgreSQL context
-    PGquery *pg = query_create(db, ctx);
+    PGquery *pg = query_create(connection, res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -362,28 +369,92 @@ static void on_person_created(PGquery *pg, PGresult *result, void *data)
 }
 ```
 
-### Register and Run
-
-Register the handler as:
+### Running Parallel Queries
 
 ```c
-get("/person", create_person_handler); // Use regular get()
-// Do NOT register with get_worker()
+void get_dashboard_data(Req *req, Res *res) {
+    // Create 3 separate query contexts
+    PGquery *pg1 = query_create(conn1, res->arena);
+    PGquery *pg2 = query_create(conn2, res->arena);
+    PGquery *pg3 = query_create(conn3, res->arena);
+    
+    // Queue independent queries
+    query_queue(pg1, "SELECT * FROM users WHERE id = $1", ...);
+    query_queue(pg2, "SELECT * FROM posts WHERE author_id = $1", ...);
+    query_queue(pg3, "SELECT * FROM comments WHERE author_id = $1", ...);
+    
+    // Execute all independently in parallel
+    query_execute(pg1);
+    query_execute(pg2);
+    query_execute(pg3);
+    
+    // All 3 queries run at the same time
+}
 ```
 
-and send a `GET` request to this URL:
+### Fire-and-Forget
 
+```c
+typedef struct {
+    Arena *spawn_arena;
+    const char *name;
+    const char *surname;
+} SpawnCtx;
+
+void on_query(PGquery *pg, PGresult *result, void *data) {
+    SpawnCtx *ctx = (SpawnCtx *)data;
+
+    if (!result)
+    {
+        printf("ERROR: Result is NULL\n");
+        goto cleanup;
+    }
+
+    ExecStatusType status = PQresultStatus(result);
+
+    if (status != PGRES_TUPLES_OK)
+    {
+        printf("on_query_person: DB check failed: %s\n", PQresultErrorMessage(result));
+        goto cleanup;
+    }
+
+    if (PQntuples(result) > 0)
+    {
+        printf("on_query_person: This person already exists\n");
+        goto cleanup;
+    }
+
+    goto cleanup;
+
+cleanup:
+    arena_return(ctx->spawn_arena);
+    return;
+}
+
+void bg_work(void *context) {
+    SpawnCtx *ctx = (SpawnCtx *)context;
+
+    PGquery *pg = query_create(conn, res->arena);
+
+    const char *select_sql = "SELECT * FROM persons WHERE name = $1 AND surname = $2";
+    const char *params[] = {ctx->name, ctx->surname};
+
+    query_queue(pg, select_sql, 2, params, on_query, ctx);
+    query_execute(pg);
+}
+
+void handler(Req *req, Res *res) {
+    Arena *spawn_arena = arena_borrow();
+    SpawnCtx *ctx = arena_alloc(spawn_arena, sizeof(SpawnCtx));
+
+    ctx->spawn_arena = spawn_arena;
+    ctx->name = get_query(req, name);
+    ctx->surname = get_query(req, surname);
+
+    spawn(ctx, bg_work, NULL);
+    send_text(res, 200, "Background job started!");
+}
 ```
-http://localhost:3000/person?name=john&surname=doe
-```
-
-Check out the `Persons` table in the Postgres, and you'll see a person has been added.
-
-> [!WARNING]
-> 
-> Do not register handlers that perform async Postgres queries with `get_worker()`, `post_worker()`, etc.
->
-> Use `get()`, `post()`, etc. instead, unless your handler performs CPU-bound work.
 
 ## API Reference
 
@@ -392,13 +463,13 @@ Check out the `Persons` table in the Postgres, and you'll see a person has been 
 Create a new async PostgreSQL context.
 
 ```c
-PGquery *query_create(PGconn *existing_conn, void *data);
+PGquery *query_create(PGconn *conn, Arena *arena);
 ```
 
 **Parameters:**
 
-- `existing_conn`: Active PostgreSQL connection
-- `data`: User data (usually Res *res for accessing in callbacks)
+- `conn`: Active PostgreSQL connection
+- `arena`: Memory arena
 
 **Returns:**
 
@@ -455,7 +526,7 @@ typedef void (*pg_result_cb_t)(PGquery *pg, PGresult *result, void *data);
 const char *sql = "SELECT * FROM users WHERE id = $1";
 const char *params[] = { "123" };
 
-query_queue(pg, sql, 1, params, on_result, res);
+query_queue(pg, sql, 1, params, on_result_cb, ctx);
 ```
 
 ### `query_execute()`

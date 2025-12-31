@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define LOG_ERROR(fmt, ...) \
+    fprintf(stderr, "[ERROR] [ecewo-postgres]" fmt "\n", ##__VA_ARGS__)
+
 struct pg_query_s {
     char *sql;
     char **params;
@@ -16,11 +19,11 @@ struct pg_query_s {
 
 struct pg_async_s {
     PGconn *conn;
+    Arena *arena;
     void *data;
 
     int is_connected;
     int is_executing;
-    char *error_message;
 
     pg_query_t *query_queue;
     pg_query_t *query_queue_tail;
@@ -35,83 +38,24 @@ struct pg_async_s {
 };
 
 static void execute_next_query(PGquery *pg);
-static void handle_error(PGquery *pg, const char *error);
-static void pg_async_cancel(PGquery *pg);
-static void pg_async_destroy(PGquery *pg);
+static void cleanup_and_destroy(PGquery *pg);
 
 #ifdef _WIN32
 static void on_timer(uv_timer_t *handle);
-static void on_timer_closed(uv_handle_t *handle);
 #else
 static void on_poll(uv_poll_t *handle, int status, int events);
-static void on_poll_closed(uv_handle_t *handle);
 #endif
 
-// ============================================================================
-// CLEANUP HELPERS
-// ============================================================================
-
-static void free_query(pg_query_t *query)
-{
-    if (!query)
-        return;
-
-    if (query->sql)
-        free(query->sql);
-
-    if (query->params) {
-        for (int i = 0; i < query->param_count; i++) {
-            if (query->params[i])
-                free(query->params[i]);
-        }
-        free(query->params);
-    }
-
-    free(query);
-}
-
-static void free_pgquery(PGquery *pg)
-{
-    if (!pg)
-        return;
-
-    if (pg->error_message) {
-        free(pg->error_message);
-        pg->error_message = NULL;
-    }
-
-    free(pg);
-}
-
-// ============================================================================
-// CLOSE CALLBACKS
-// ============================================================================
-
-#ifdef _WIN32
-static void on_timer_closed(uv_handle_t *handle)
+static void on_handle_closed(uv_handle_t *handle)
 {
     if (!handle || !handle->data)
         return;
 
     PGquery *pg = (PGquery *)handle->data;
-    free_pgquery(pg);
+    pg->handle_initialized = 0;
 }
-#else
-static void on_poll_closed(uv_handle_t *handle)
-{
-    if (!handle || !handle->data)
-        return;
 
-    PGquery *pg = (PGquery *)handle->data;
-    free_pgquery(pg);
-}
-#endif
-
-// ============================================================================
-// CANCEL AND DESTROY
-// ============================================================================
-
-static void pg_async_cancel(PGquery *pg)
+static void cancel_execution(PGquery *pg)
 {
     if (!pg)
         return;
@@ -120,15 +64,14 @@ static void pg_async_cancel(PGquery *pg)
 #ifdef _WIN32
         uv_timer_stop(&pg->timer);
         if (!uv_is_closing((uv_handle_t *)&pg->timer)) {
-            uv_close((uv_handle_t *)&pg->timer, NULL);
+            uv_close((uv_handle_t *)&pg->timer, on_handle_closed);
         }
 #else
         uv_poll_stop(&pg->poll);
         if (!uv_is_closing((uv_handle_t *)&pg->poll)) {
-            uv_close((uv_handle_t *)&pg->poll, NULL);
+            uv_close((uv_handle_t *)&pg->poll, on_handle_closed);
         }
 #endif
-        pg->handle_initialized = 0;
     }
 
     if (pg->conn && pg->is_executing) {
@@ -141,214 +84,152 @@ static void pg_async_cancel(PGquery *pg)
     }
 
     pg->is_executing = 0;
-
-    pg_query_t *query = pg->query_queue;
-    while (query) {
-        pg_query_t *next = query->next;
-        free_query(query);
-        query = next;
-    }
-
-    pg->query_queue = NULL;
-    pg->query_queue_tail = NULL;
-    pg->current_query = NULL;
 }
 
-static void pg_async_destroy(PGquery *pg)
+static void cleanup_and_destroy(PGquery *pg)
 {
     if (!pg)
         return;
 
-    pg_async_cancel(pg);
-
-    // If handle is still active, close it (will free in callback)
-    if (pg->handle_initialized) {
-#ifdef _WIN32
-        if (!uv_is_closing((uv_handle_t *)&pg->timer)) {
-            uv_close((uv_handle_t *)&pg->timer, on_timer_closed);
-        }
-#else
-        if (!uv_is_closing((uv_handle_t *)&pg->poll)) {
-            uv_close((uv_handle_t *)&pg->poll, on_poll_closed);
-        }
-#endif
-        // Will be freed in close callback
-    } else {
-        // No active handle, safe to free immediately
-        free_pgquery(pg);
-    }
+    cancel_execution(pg);
+    // PGquery is in the arena - caller manages its memory
 }
-
-// ============================================================================
-// ERROR HANDLING
-// ============================================================================
-
-static void handle_error(PGquery *pg, const char *error)
-{
-    printf("handle_error: %s\n", error ? error : "Unknown error");
-
-    if (error && !pg->error_message) {
-        pg->error_message = strdup(error);
-    }
-
-    if (pg->is_executing) {
-        pg->is_executing = 0;
-        decrement_async_work();
-    }
-
-    pg_async_destroy(pg);
-}
-
-// ============================================================================
-// LIBUV CALLBACKS
-// ============================================================================
 
 #ifdef _WIN32
 static void on_timer(uv_timer_t *handle)
 {
-    if (!handle || !handle->data) {
-        printf("on_timer: Invalid handle or handle->data\n");
+    if (!handle || !handle->data)
         return;
-    }
 
     PGquery *pg = (PGquery *)handle->data;
 
     if (!server_is_running()) {
         uv_timer_stop(&pg->timer);
         if (!uv_is_closing((uv_handle_t *)&pg->timer)) {
-            uv_close((uv_handle_t *)&pg->timer, on_timer_closed);
+            uv_close((uv_handle_t *)&pg->timer, on_handle_closed);
         }
-        pg->handle_initialized = 0;
         pg->is_executing = 0;
         decrement_async_work();
+        cleanup_and_destroy(pg);
         return;
     }
 
     if (!PQconsumeInput(pg->conn)) {
-        printf("on_timer: PQconsumeInput failed: %s\n", PQerrorMessage(pg->conn));
-        handle_error(pg, PQerrorMessage(pg->conn));
+        LOG_ERROR("PQconsumeInput failed: %s", PQerrorMessage(pg->conn));
+        pg->is_executing = 0;
+        decrement_async_work();
+        cleanup_and_destroy(pg);
         return;
     }
 
-    if (PQisBusy(pg->conn)) {
+    if (PQisBusy(pg->conn))
         return;
-    }
 
     uv_timer_stop(&pg->timer);
 
     PGresult *result;
     while ((result = PQgetResult(pg->conn)) != NULL) {
-        if (pg->current_query && pg->current_query->result_cb) {
-            pg->current_query->result_cb(pg, result, pg->current_query->data);
-        }
-
         ExecStatusType result_status = PQresultStatus(result);
 
         if (result_status != PGRES_TUPLES_OK && result_status != PGRES_COMMAND_OK) {
-            const char *error_msg = PQresultErrorMessage(result);
-            printf("on_timer: Query error: %s\n", error_msg);
+            LOG_ERROR("Query failed: %s", PQresultErrorMessage(result));
             PQclear(result);
             pg->current_query = NULL;
-            handle_error(pg, error_msg);
+            pg->is_executing = 0;
+            decrement_async_work();
+            cleanup_and_destroy(pg);
             return;
+        }
+
+        if (pg->current_query && pg->current_query->result_cb) {
+            pg->current_query->result_cb(pg, result, pg->current_query->data);
         }
 
         PQclear(result);
     }
 
-    if (pg->current_query) {
-        free_query(pg->current_query);
-        pg->current_query = NULL;
-    }
-
+    pg->current_query = NULL;
     execute_next_query(pg);
 }
 #else
 static void on_poll(uv_poll_t *handle, int status, int events)
 {
-    if (!handle || !handle->data) {
-        printf("on_poll: Invalid handle or handle->data\n");
+    if (!handle || !handle->data)
         return;
-    }
 
     PGquery *pg = (PGquery *)handle->data;
 
     if (!server_is_running()) {
         uv_poll_stop(&pg->poll);
         if (!uv_is_closing((uv_handle_t *)&pg->poll)) {
-            uv_close((uv_handle_t *)&pg->poll, on_poll_closed);
+            uv_close((uv_handle_t *)&pg->poll, on_handle_closed);
         }
-        pg->handle_initialized = 0;
         pg->is_executing = 0;
         decrement_async_work();
+        cleanup_and_destroy(pg);
         return;
     }
 
     if (status < 0) {
-        printf("on_poll: Poll error: %s\n", uv_strerror(status));
-        handle_error(pg, uv_strerror(status));
+        LOG_ERROR("Poll error: %s", uv_strerror(status));
+        pg->is_executing = 0;
+        decrement_async_work();
+        cleanup_and_destroy(pg);
         return;
     }
 
     if (!PQconsumeInput(pg->conn)) {
-        printf("on_poll: PQconsumeInput failed: %s\n", PQerrorMessage(pg->conn));
-        handle_error(pg, PQerrorMessage(pg->conn));
+        LOG_ERROR("PQconsumeInput failed: %s", PQerrorMessage(pg->conn));
+        pg->is_executing = 0;
+        decrement_async_work();
+        cleanup_and_destroy(pg);
         return;
     }
 
-    if (PQisBusy(pg->conn)) {
+    if (PQisBusy(pg->conn))
         return;
-    }
 
     uv_poll_stop(&pg->poll);
 
     PGresult *result;
     while ((result = PQgetResult(pg->conn)) != NULL) {
-        if (pg->current_query && pg->current_query->result_cb) {
-            pg->current_query->result_cb(pg, result, pg->current_query->data);
-        }
-
         ExecStatusType result_status = PQresultStatus(result);
 
         if (result_status != PGRES_TUPLES_OK && result_status != PGRES_COMMAND_OK) {
-            const char *error_msg = PQresultErrorMessage(result);
-            printf("on_poll: Query error: %s\n", error_msg);
+            LOG_ERROR("Query failed: %s", PQresultErrorMessage(result));
             PQclear(result);
             pg->current_query = NULL;
-            handle_error(pg, error_msg);
+            pg->is_executing = 0;
+            decrement_async_work();
+            cleanup_and_destroy(pg);
             return;
+        }
+
+        if (pg->current_query && pg->current_query->result_cb) {
+            pg->current_query->result_cb(pg, result, pg->current_query->data);
         }
 
         PQclear(result);
     }
 
-    if (pg->current_query) {
-        free_query(pg->current_query);
-        pg->current_query = NULL;
-    }
-
+    pg->current_query = NULL;
     execute_next_query(pg);
 }
 #endif
-
-// ============================================================================
-// QUERY EXECUTION
-// ============================================================================
 
 static void execute_next_query(PGquery *pg)
 {
     if (!pg->query_queue) {
         pg->is_executing = 0;
         decrement_async_work();
-
-        pg_async_destroy(pg);
+        cleanup_and_destroy(pg);
         return;
     }
 
     if (!server_is_running()) {
         pg->is_executing = 0;
         decrement_async_work();
-        pg_async_destroy(pg);
+        cleanup_and_destroy(pg);
         return;
     }
 
@@ -364,30 +245,31 @@ static void execute_next_query(PGquery *pg)
             pg->conn,
             pg->current_query->sql,
             pg->current_query->param_count,
-            NULL, // param types
+            NULL,
             (const char **)pg->current_query->params,
-            NULL, // param lengths
-            NULL, // param formats
-            0); // result format (text)
+            NULL,
+            NULL,
+            0);
     } else {
         result = PQsendQuery(pg->conn, pg->current_query->sql);
     }
 
     if (!result) {
-        printf("execute_next_query: Failed to send query: %s\n",
-               PQerrorMessage(pg->conn));
-        handle_error(pg, PQerrorMessage(pg->conn));
+        LOG_ERROR("Failed to send query: %s", PQerrorMessage(pg->conn));
+        pg->is_executing = 0;
+        decrement_async_work();
+        cleanup_and_destroy(pg);
         return;
     }
 
-    // Initialize and start libuv handle
 #ifdef _WIN32
     if (!pg->handle_initialized) {
-        int init_result = uv_timer_init(uv_default_loop(), &pg->timer);
+        int init_result = uv_timer_init(get_loop(), &pg->timer);
         if (init_result != 0) {
-            printf("execute_next_query: uv_timer_init failed: %s\n",
-                   uv_strerror(init_result));
-            handle_error(pg, uv_strerror(init_result));
+            LOG_ERROR("uv_timer_init failed: %s", uv_strerror(init_result));
+            pg->is_executing = 0;
+            decrement_async_work();
+            cleanup_and_destroy(pg);
             return;
         }
         pg->handle_initialized = 1;
@@ -396,26 +278,30 @@ static void execute_next_query(PGquery *pg)
 
     int start_result = uv_timer_start(&pg->timer, on_timer, 10, 10);
     if (start_result != 0) {
-        printf("execute_next_query: uv_timer_start failed: %s\n",
-               uv_strerror(start_result));
-        handle_error(pg, uv_strerror(start_result));
+        LOG_ERROR("uv_timer_start failed: %s", uv_strerror(start_result));
+        pg->is_executing = 0;
+        decrement_async_work();
+        cleanup_and_destroy(pg);
         return;
     }
 #else
     int sock = PQsocket(pg->conn);
 
     if (sock < 0) {
-        printf("execute_next_query: Invalid socket: %d\n", sock);
-        handle_error(pg, "Invalid PostgreSQL socket");
+        LOG_ERROR("Invalid PostgreSQL socket");
+        pg->is_executing = 0;
+        decrement_async_work();
+        cleanup_and_destroy(pg);
         return;
     }
 
     if (!pg->handle_initialized) {
-        int init_result = uv_poll_init(uv_default_loop(), &pg->poll, sock);
+        int init_result = uv_poll_init(get_loop(), &pg->poll, sock);
         if (init_result != 0) {
-            printf("execute_next_query: uv_poll_init failed: %s\n",
-                   uv_strerror(init_result));
-            handle_error(pg, uv_strerror(init_result));
+            LOG_ERROR("uv_poll_init failed: %s", uv_strerror(init_result));
+            pg->is_executing = 0;
+            decrement_async_work();
+            cleanup_and_destroy(pg);
             return;
         }
 
@@ -425,44 +311,39 @@ static void execute_next_query(PGquery *pg)
 
     int start_result = uv_poll_start(&pg->poll, UV_READABLE | UV_WRITABLE, on_poll);
     if (start_result != 0) {
-        printf("execute_next_query: uv_poll_start failed: %s\n",
-               uv_strerror(start_result));
-        handle_error(pg, uv_strerror(start_result));
+        LOG_ERROR("uv_poll_start failed: %s", uv_strerror(start_result));
+        pg->is_executing = 0;
+        decrement_async_work();
+        cleanup_and_destroy(pg);
         return;
     }
 #endif
 }
 
-// ============================================================================
-// PUBLIC API
-// ============================================================================
-
-PGquery *query_create(PGconn *existing_conn, void *data)
+PGquery *query_create(PGconn *conn, Arena *arena)
 {
-    if (!existing_conn) {
-        printf("query_create: existing_conn is NULL\n");
+    if (!conn || !arena) {
+        LOG_ERROR("query_create failed: conn or arena is NULL");
         return NULL;
     }
 
-    if (PQstatus(existing_conn) != CONNECTION_OK) {
-        printf("query_create: Connection status is not OK: %d\n",
-               PQstatus(existing_conn));
+    if (PQstatus(conn) != CONNECTION_OK) {
+        LOG_ERROR("query_create failed: Connection status is not OK");
         return NULL;
     }
 
-    PGquery *pg = malloc(sizeof(PGquery));
+    PGquery *pg = arena_alloc(arena, sizeof(PGquery));
     if (!pg) {
-        printf("query_create: Failed to allocate memory\n");
+        LOG_ERROR("query_create failed: Failed to allocate from arena");
         return NULL;
     }
 
     memset(pg, 0, sizeof(PGquery));
-    pg->conn = existing_conn;
-    pg->data = data;
+    pg->conn = conn;
+    pg->arena = arena;
     pg->is_connected = 1;
     pg->is_executing = 0;
     pg->handle_initialized = 0;
-    pg->error_message = NULL;
     pg->query_queue = NULL;
     pg->query_queue_tail = NULL;
     pg->current_query = NULL;
@@ -484,49 +365,37 @@ int query_queue(PGquery *pg,
                 void *query_data)
 {
     if (!pg || !sql) {
-        printf("query_queue: Invalid parameters\n");
+        LOG_ERROR("query_queue: Invalid parameters");        
         return -1;
     }
 
-    pg_query_t *query = malloc(sizeof(pg_query_t));
+    pg_query_t *query = arena_alloc(pg->arena, sizeof(pg_query_t));
     if (!query) {
-        printf("query_queue: Failed to allocate query\n");
+        LOG_ERROR("query_queue: Failed to allocate query");
         return -1;
     }
 
     memset(query, 0, sizeof(pg_query_t));
     query->next = NULL;
 
-    query->sql = strdup(sql);
+    query->sql = arena_strdup(pg->arena, sql);
     if (!query->sql) {
-        printf("query_queue: Failed to copy SQL\n");
-        free(query);
+        LOG_ERROR("query_queue: Failed to copy SQL");
         return -1;
     }
 
     if (param_count > 0 && params) {
-        query->params = malloc(param_count * sizeof(char *));
+        query->params = arena_alloc(pg->arena, param_count * sizeof(char *));
         if (!query->params) {
-            printf("query_queue: Failed to allocate params\n");
-            free(query->sql);
-            free(query);
+            LOG_ERROR("query_queue: Failed to allocate params");
             return -1;
         }
 
         for (int i = 0; i < param_count; i++) {
             if (params[i]) {
-                query->params[i] = strdup(params[i]);
-
+                query->params[i] = arena_strdup(pg->arena, params[i]);
                 if (!query->params[i]) {
-                    printf("query_queue: Failed to allocate a param\n");
-
-                    for (int j = 0; j < i; j++) {
-                        free(query->params[j]);
-                    }
-
-                    free(query->params);
-                    free(query->sql);
-                    free(query);
+                    LOG_ERROR("query_queue: Failed to allocate a param");
                     return -1;
                 }
             } else {
@@ -554,22 +423,23 @@ int query_queue(PGquery *pg,
 int query_execute(PGquery *pg)
 {
     if (!pg) {
-        printf("query_execute: pg is NULL\n");
+        LOG_ERROR("query_execute: pg is NULL");
         return -1;
     }
 
     if (!pg->is_connected) {
-        printf("query_execute: Not connected\n");
+        LOG_ERROR("query_execute: Not connected");
         return -1;
     }
 
-    if (pg->is_executing) {
-        printf("query_execute: Already executing\n");
+    if (pg->is_executing)
+    {
+        LOG_ERROR("query_execute: Already executing");
         return -1;
     }
 
     if (!pg->query_queue) {
-        free_pgquery(pg);
+        cleanup_and_destroy(pg);
         return 0;
     }
 
